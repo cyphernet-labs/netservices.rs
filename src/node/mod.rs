@@ -20,7 +20,3 @@
 // limitations under the License.
 
 mod node;
-mod remotes;
-
-pub use node::{Metrics, Node, NodeController, NodeCtl};
-pub use remotes::{DisconnectReason, Inbound, Outbound, Remote, Remotes};

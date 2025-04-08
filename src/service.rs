@@ -40,6 +40,8 @@ use crate::{
     NetTransport, SessionEvent,
 };
 
+const NAME: &str = "service";
+
 // TODO: Do a proper metrics measurements
 // TODO: Consider collecting metrics using Marshaller; move (dis)connection counting to business
 //       logic
@@ -188,7 +190,7 @@ impl<
             Entry::Vacant(_) => {
                 // Connecting remote with no session.
                 #[cfg(feature = "log")]
-                log::debug!(target: "node-service", "Disconnecting pending remote with id={res_id}: {reason}");
+                log::debug!(target: NAME, "Disconnecting pending remote with id={res_id}: {reason}");
                 self.actions.push_back(Action::UnregisterTransport(res_id));
 
                 // Check for attempted outbound connections. Unestablished inbound connections don't
@@ -205,7 +207,7 @@ impl<
                     ..
                 } => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "node-service", "Remote with id={res_id} is already disconnecting");
+                    log::error!(target: NAME, "Remote with id={res_id} is already disconnecting");
 
                     remote_id.as_ref().map(|id| (id.clone(), *direction))
                 }
@@ -215,7 +217,7 @@ impl<
                     ..
                 } => {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "node-service", "Disconnecting remote with id={res_id}: {reason}");
+                    log::debug!(target: NAME, "Disconnecting remote with id={res_id}: {reason}");
 
                     let direction = *direction;
                     let remote_id = *remote_id;
@@ -236,10 +238,10 @@ impl<
     fn cleanup(&mut self, #[allow(unused_variables)] res_id: ResourceId, fd: RawFd) {
         if self.inbound.remove(&fd).is_some() {
             #[cfg(feature = "log")]
-            log::debug!(target: "node-service", "Cleaning up inbound remote state with id={res_id} (fd={fd})");
+            log::debug!(target: NAME, "Cleaning up inbound remote state with id={res_id} (fd={fd})");
         } else if let Some(outbound) = self.outbound.remove(&fd) {
             #[cfg(feature = "log")]
-            log::debug!(target: "node-service", "Cleaning up outbound remote state with id={res_id} (fd={fd})");
+            log::debug!(target: NAME, "Cleaning up outbound remote state with id={res_id} (fd={fd})");
             self.controller.on_disconnected(
                 outbound.remote_id,
                 Direction::Outbound,
@@ -247,7 +249,7 @@ impl<
             );
         } else {
             #[cfg(feature = "log")]
-            log::warn!(target: "node-service", "Tried to clean up unknown remote with id={res_id} (fd={fd})");
+            log::warn!(target: NAME, "Tried to clean up unknown remote with id={res_id} (fd={fd})");
         }
     }
 }
@@ -278,49 +280,46 @@ impl<
             ListenerEvent::Accepted(connection) => {
                 let Ok(remote) = connection.remote_addr() else {
                     #[cfg(feature = "log")]
-                    log::warn!(target: "node-service", "Accepted connection doesn't have remote address; dropping");
+                    log::warn!(target: NAME, "Accepted connection doesn't have remote address; dropping");
                     drop(connection);
 
                     return;
                 };
                 let fd = connection.as_raw_fd();
                 #[cfg(feature = "log")]
-                log::debug!(target: "node-service", "Inbound connection from {remote} (fd={fd})");
+                log::debug!(target: NAME, "Inbound connection from {remote} (fd={fd})");
 
                 // If the service doesn't want to accept this connection,
                 // we drop the connection here, which disconnects the socket.
                 if !self.controller.should_accept(&remote, time) {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "node-service", "Rejecting inbound connection from {remote} (fd={fd})");
+                    log::debug!(target: NAME, "Rejecting inbound connection from {remote} (fd={fd})");
                     drop(connection);
 
                     return;
                 }
 
-                let session = match self.controller.establish_session(
-                    remote.clone(),
-                    connection,
-                    time,
-                ) {
-                    Ok(s) => s,
-                    #[allow(unused_variables)]
-                    Err(err) => {
-                        #[cfg(feature = "log")]
-                        log::error!(target: "node-service", "Error creating session for {remote}: {err}");
-                        return;
-                    }
-                };
+                let session =
+                    match self.controller.establish_session(remote.clone(), connection, time) {
+                        Ok(s) => s,
+                        #[allow(unused_variables)]
+                        Err(err) => {
+                            #[cfg(feature = "log")]
+                            log::error!(target: NAME, "Error creating session for {remote}: {err}");
+                            return;
+                        }
+                    };
                 let transport = match NetTransport::with_session(session, Direction::Inbound) {
                     Ok(transport) => transport,
                     #[allow(unused_variables)]
                     Err(err) => {
                         #[cfg(feature = "log")]
-                        log::error!(target: "node-service", "Failed to create transport for accepted connection: {err}");
+                        log::error!(target: NAME, "Failed to create transport for accepted connection: {err}");
                         return;
                     }
                 };
                 #[cfg(feature = "log")]
-                log::debug!(target: "node-service", "Accepted inbound connection from {remote} (fd={fd})");
+                log::debug!(target: NAME, "Accepted inbound connection from {remote} (fd={fd})");
 
                 self.inbound.insert(fd, Inbound {
                     res_id: None,
@@ -332,7 +331,7 @@ impl<
                 let listener = self.listening.get(&listener_fd).expect("listener must exist");
                 let addr = listener.to_socket_addr();
                 #[cfg(feature = "log")]
-                log::error!(target: "node-service", "Error accepting an inbound connection on {addr} (fd={listener_fd}): {err}");
+                log::error!(target: NAME, "Error accepting an inbound connection on {addr} (fd={listener_fd}): {err}");
                 self.controller.on_accept_failure(addr, err, time);
             }
         }
@@ -354,7 +353,7 @@ impl<
                 // Make sure we don't try to connect to ourselves by mistake.
                 if remote_id == self.local_id {
                     #[cfg(feature = "log")]
-                    log::error!(target: "node-service", "Self-connection detected, disconnecting");
+                    log::error!(target: NAME, "Self-connection detected, disconnecting");
                     self.disconnect(res_id, DisconnectReason::SelfConnection);
 
                     return;
@@ -367,12 +366,12 @@ impl<
                     (remote.addr, Direction::Outbound)
                 } else {
                     #[cfg(feature = "log")]
-                    log::error!(target: "node-service", "Session for {remote_id} (id={res_id}) not found");
+                    log::error!(target: NAME, "Session for {remote_id} (id={res_id}) not found");
                     return;
                 };
                 #[cfg(feature = "log")]
                 log::debug!(
-                    target: "node-service",
+                    target: NAME,
                     "Session established with {remote_id} (id={res_id}, fd={fd}, {direction})",
                 );
 
@@ -440,7 +439,7 @@ impl<
 
                         #[cfg(feature = "log")]
                         log::warn!(
-                            target: "node-service", "Established session (id={res_id}) conflicts with existing session for {remote_id} (id={c_id})"
+                            target: NAME, "Established session (id={res_id}) conflicts with existing session for {remote_id} (id={c_id})"
                         );
                         disconnect.push(close);
                     }
@@ -448,7 +447,7 @@ impl<
                 for conflicting_id in &disconnect {
                     #[cfg(feature = "log")]
                     log::warn!(
-                        target: "node-service", "Closing conflicting session (id={conflicting_id}) with {remote_id}.."
+                        target: NAME, "Closing conflicting session (id={conflicting_id}) with {remote_id}.."
                     );
                     // Disconnect and return the associated remote node ID of the remote, if
                     // available.
@@ -479,7 +478,7 @@ impl<
                 }) = self.remotes.get_mut(&res_id)
                 else {
                     #[cfg(feature = "log")]
-                    log::warn!(target: "node-service", "Dropping message from unconnected remote (id={res_id})");
+                    log::warn!(target: NAME, "Dropping message from unconnected remote (id={res_id})");
                     return;
                 };
 
@@ -488,7 +487,7 @@ impl<
 
                 if let Err(err) = marshaller.write_all(&data) {
                     #[cfg(feature = "log")]
-                    log::error!(target: "node-service", "Unable to process messages fast enough for remote {res_id}; disconnecting");
+                    log::error!(target: NAME, "Unable to process messages fast enough for remote {res_id}; disconnecting");
                     self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
 
                     return;
@@ -505,11 +504,11 @@ impl<
                         }
                         Err(err) => {
                             #[cfg(feature = "log")]
-                            log::error!(target: "node-service", "Invalid gossip message from {remote_id}: {err}");
+                            log::error!(target: NAME, "Invalid gossip message from {remote_id}: {err}");
 
                             if marshaller.read_queue_len() != 0 {
                                 #[cfg(feature = "log")]
-                                log::debug!(target: "node-service", "Dropping read buffer for {remote_id} with {} bytes", marshaller.read_queue_len());
+                                log::debug!(target: NAME, "Dropping read buffer for {remote_id} with {} bytes", marshaller.read_queue_len());
                             }
                             self.controller.on_frame_unparsable(res_id, &err);
                             self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
@@ -534,15 +533,15 @@ impl<
             ResourceType::Transport => {
                 if let Some(outbound) = self.outbound.get_mut(&fd) {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "node-service", "Outbound remote resource registered for {} with id={id} (fd={fd})", outbound.remote_id);
+                    log::debug!(target: NAME, "Outbound remote resource registered for {} with id={id} (fd={fd})", outbound.remote_id);
                     outbound.res_id = Some(id);
                 } else if let Some(inbound) = self.inbound.get_mut(&fd) {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "node-service", "Inbound remote resource registered with id={id} (fd={fd})");
+                    log::debug!(target: NAME, "Inbound remote resource registered with id={id} (fd={fd})");
                     inbound.res_id = Some(id);
                 } else {
                     #[cfg(feature = "log")]
-                    log::warn!(target: "node-service", "Unknown remote registered with id={id} (fd={fd})");
+                    log::warn!(target: NAME, "Unknown remote registered with id={id} (fd={fd})");
                 }
             }
         }
@@ -556,18 +555,18 @@ impl<
             Error::Poll(err) => {
                 // TODO: This should be a fatal error, there's nothing we can do here.
                 #[cfg(feature = "log")]
-                log::error!(target: "node-service", "Can't poll connections: {err}");
+                log::error!(target: NAME, "Can't poll connections: {err}");
             }
             #[allow(unused_variables)]
             Error::ListenerDisconnect(id, _) => {
                 // TODO: This should be a fatal error, there's nothing we can do here.
                 #[cfg(feature = "log")]
-                log::error!(target: "node-service", "Listener {id} disconnected");
+                log::error!(target: NAME, "Listener {id} disconnected");
             }
             Error::TransportDisconnect(id, transport) => {
                 let fd = transport.as_raw_fd();
                 #[cfg(feature = "log")]
-                log::error!(target: "node-service", "Remote id={id} (fd={fd}) disconnected");
+                log::error!(target: NAME, "Remote id={id} (fd={fd}) disconnected");
 
                 // We're dropping the transport (and underlying network connection) here.
                 drop(transport);
@@ -585,7 +584,7 @@ impl<
                             );
                         } else {
                             #[cfg(feature = "log")]
-                            log::debug!(target: "node-service", "Inbound disconnection before handshake; ignoring")
+                            log::debug!(target: NAME, "Inbound disconnection before handshake; ignoring")
                         }
                     }
                     None => self.cleanup(id, fd),
@@ -600,7 +599,7 @@ impl<
         listener: Self::Listener,
     ) {
         #[cfg(feature = "log")]
-        log::debug!(target: "node-service", "Listener was unbound with id={res_id} (fd={})", listener.as_raw_fd());
+        log::debug!(target: NAME, "Listener was unbound with id={res_id} (fd={})", listener.as_raw_fd());
         self.controller.on_unbound(listener)
     }
 
@@ -617,7 +616,7 @@ impl<
                         ..
                     } => {
                         #[cfg(feature = "log")]
-                        log::debug!(target: "node-service", "Transport handover for disconnecting remote with id={res_id} (fd={fd})");
+                        log::debug!(target: NAME, "Transport handover for disconnecting remote with id={res_id} (fd={fd})");
 
                         // Disconnect TCP stream.
                         drop(transport);
@@ -688,7 +687,7 @@ impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {
         for socket in listen {
             service.listen(socket);
         }
-        let reactor = Reactor::named(service, popol::Poller::new(), s!("node-service"))?;
+        let reactor = Reactor::named(service, popol::Poller::new(), NAME.to_string())?;
         Ok(Self { reactor })
     }
 

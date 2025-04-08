@@ -202,7 +202,8 @@ pub enum SessionEvent<S: NetSession> {
 }
 
 /// A state of [`NetTransport`] network transport.
-#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
+#[display(lowercase)]
 pub enum TransportState {
     /// The transport is initiated, but the connection has not established yet.
     /// This happens only for outgoing connections due to the use of
@@ -265,16 +266,9 @@ impl<S: NetSession> NetTransport<S> {
     ///
     /// If a session can be put into a non-blocking mode.
     pub fn with_session(mut session: S, link_direction: Direction) -> io::Result<Self> {
-        let state = if session.is_established() {
-            // If we are disconnected, we will get instantly updated from the
-            // reactor and the state will change automatically
-            TransportState::Active
-        } else {
-            TransportState::Handshake
-        };
         session.as_connection_mut().set_nonblocking(true)?;
         Ok(Self {
-            state,
+            state: TransportState::Handshake,
             session,
             link_direction,
             write_intent: true,
@@ -455,6 +449,9 @@ impl<S: NetSession> Resource for NetTransport<S> {
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
         debug_assert_ne!(self.state, TransportState::Terminated, "I/O on terminated transport");
 
+        #[cfg(feature = "log")]
+        log::trace!(target: "transport", "Handling I/O on transport {self} with {io:?} intent while in {} state", self.state);
+
         let mut force_write_intent = false;
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
@@ -463,7 +460,6 @@ impl<S: NetSession> Resource for NetTransport<S> {
             force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
-            debug_assert!(!self.session.is_established());
             #[cfg(feature = "log")]
             log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
         }
@@ -488,7 +484,7 @@ impl<S: NetSession> Resource for NetTransport<S> {
 
             self.state = TransportState::Terminated;
             resp
-        } else if self.session.is_established() && self.state == TransportState::Handshake {
+        } else if self.session.is_established() && self.state != TransportState::Active {
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Handshake with {self} is complete");
 
@@ -520,7 +516,9 @@ impl<S: NetSession> Write for NetTransport<S> {
 }
 
 impl<S: NetSession> WriteAtomic for NetTransport<S> {
-    fn is_ready_to_write(&self) -> bool { self.state == TransportState::Active }
+    fn is_ready_to_write(&self) -> bool {
+        self.state == TransportState::Active || self.session.is_established()
+    }
 
     fn empty_write_buf(&mut self) -> io::Result<bool> {
         let len = self.session.write(self.write_buffer.make_contiguous())?;

@@ -279,7 +279,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices-client", "established connection to server (fd={fd}, time={time}), notifying delegate");
 
-                self.connection_fd = Some(fd);
+                debug_assert_eq!(self.connection_fd, Some(fd));
                 self.delegate.on_established(artifact, self.attempts);
             }
             SessionEvent::Data(data) => match D::Reply::try_from(data) {
@@ -318,8 +318,8 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
         #[cfg(feature = "log")]
         log::trace!(target: "netservices-client", "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
         debug_assert_eq!(ty, ResourceType::Transport);
-        debug_assert_eq!(self.connection_fd, Some(fd));
 
+        self.connection_fd = Some(fd);
         self.connection_id = Some(id);
 
         #[cfg(feature = "log")]

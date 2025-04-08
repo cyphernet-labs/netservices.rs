@@ -59,8 +59,8 @@ pub enum ClientCommand<E: Send = ()> {
     Terminate,
 }
 
-// Most of concrete types for generic `E` are not `Debug` (for instance, function closures); thus,
-// we have to provide a manual implementation.
+// Most of the concrete types for generic `E` are not `Debug` (for instance, function closures);
+// thus, we have to provide a manual implementation.
 impl<E: Send> Debug for ClientCommand<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -413,9 +413,10 @@ where E: Send + 'static
             .controller()
             .cmd(ClientCommand::Terminate)
             .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
-        self.reactor.join()?;
-        Ok(())
+        self.join()
     }
+
+    pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.reactor.join() }
 
     pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
         self.reactor.controller().cmd(ClientCommand::Send(data.into(), extra))

@@ -232,4 +232,6 @@ impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcClient<Req, Rep> {
 
     /// Terminates the client, disconnecting from the server and stopping the reactor thread.
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> { self.inner.terminate() }
+
+    pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.inner.join() }
 }

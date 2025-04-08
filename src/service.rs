@@ -30,7 +30,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::{io, net, thread};
 
-use cyphernet::addr::Addr;
+use cyphernet::addr::{Addr, ToSocketAddr};
 use reactor::poller::popol;
 use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
 
@@ -54,6 +54,7 @@ pub struct Metrics {
     pub disconnects: usize,
 }
 
+#[allow(unused_variables)]
 pub trait ServiceController<
     A: Addr + Send,
     S: NetSession,
@@ -61,7 +62,8 @@ pub trait ServiceController<
     Cmd,
 >: Send
 {
-    type Frame: Frame;
+    /// Framing for incoming messages
+    type InFrame: Frame;
 
     // TODO: Replace with passing sender object
     fn extract_actions(
@@ -70,16 +72,17 @@ pub trait ServiceController<
 
     fn should_accept(&mut self, remote: &A, time: Timestamp) -> bool;
 
-    fn accept(
+    fn establish_session(
         &mut self,
         remote: A,
         connection: S::Connection,
         time: Timestamp,
     ) -> Result<S, impl std::error::Error>;
 
-    fn on_listening(&mut self, socket: net::SocketAddr);
+    fn on_listening(&mut self, socket: net::SocketAddr) {}
 
-    fn on_listener_failure(&mut self, res_id: ResourceId, err: io::Error, time: Timestamp);
+    /// Called when a listener failed to accept an incoming connection.
+    fn on_accept_failure(&mut self, socket: net::SocketAddr, err: io::Error, time: Timestamp) {}
 
     fn on_established(
         &mut self,
@@ -87,36 +90,40 @@ pub trait ServiceController<
         addr: A,
         direction: Direction,
         time: Timestamp,
-    );
+    ) {
+    }
 
     fn on_disconnected(
         &mut self,
         remote_id: <S::Artifact as Artifact>::NodeId,
         direction: Direction,
         reason: &DisconnectReason,
-    );
+    ) {
+    }
 
-    /// Called when a listener get disconnected and handed over by the reactor
-    fn on_unbound(&mut self, listener: NetAccept<S, L>);
+    /// Called when a listener get disconnected by a controller action, and now it is handed over by
+    /// the reactor.
+    fn on_unbound(&mut self, listener: NetAccept<S, L>) {}
 
     fn on_tick(
         &mut self,
         time: Timestamp,
         metrics: &HashMap<<S::Artifact as Artifact>::NodeId, Metrics>,
-    );
+    ) {
+    }
 
-    fn on_terminate(&mut self);
+    fn on_shutdown(&mut self) {}
 
     fn on_command(&mut self, cmd: Cmd);
 
-    fn on_timer(&mut self);
+    fn on_timer(&mut self) {}
 
     // TODO: Pass sender
-    fn on_frame(&mut self, req: Self::Frame);
+    fn on_frame(&mut self, req: Self::InFrame);
 
     /// Called on failure of frame parsing, before disconnecting the remote and calling
     /// [`on_disconnect`].
-    fn on_frame_unparsable(&mut self, err: &<Self::Frame as Frame>::Error);
+    fn on_frame_unparsable(&mut self, err: &<Self::InFrame as Frame>::Error);
 }
 
 // TODO: Consider using const generics to define whether service may have inbound and outbound
@@ -261,7 +268,8 @@ impl<
 
     fn handle_listener_event(
         &mut self,
-        res_id: ResourceId,
+        listener_fd: RawFd,
+        _res_id: ResourceId,
         event: <Self::Listener as Resource>::Event,
         time: Timestamp,
     ) {
@@ -288,8 +296,13 @@ impl<
                     return;
                 }
 
-                let session = match self.controller.accept(remote.clone(), connection, time) {
+                let session = match self.controller.establish_session(
+                    remote.clone(),
+                    connection,
+                    time,
+                ) {
                     Ok(s) => s,
+                    #[allow(unused_variables)]
                     Err(err) => {
                         #[cfg(feature = "log")]
                         log::error!(target: "node-service", "Error creating session for {remote}: {err}");
@@ -298,6 +311,7 @@ impl<
                 };
                 let transport = match NetTransport::with_session(session, Direction::Inbound) {
                     Ok(transport) => transport,
+                    #[allow(unused_variables)]
                     Err(err) => {
                         #[cfg(feature = "log")]
                         log::error!(target: "node-service", "Failed to create transport for accepted connection: {err}");
@@ -314,21 +328,24 @@ impl<
                 self.actions.push_back(Action::RegisterTransport(transport))
             }
             ListenerEvent::Failure(err) => {
+                let listener = self.listening.get(&listener_fd).expect("listener must exist");
+                let addr = listener.to_socket_addr();
                 #[cfg(feature = "log")]
-                log::error!(target: "node-service", "Error listening for inbound connections: {err}");
-                self.controller.on_listener_failure(res_id, err, time);
+                log::error!(target: "node-service", "Error accepting an inbound connection on {addr} (fd={listener_fd}): {err}");
+                self.controller.on_accept_failure(addr, err, time);
             }
         }
     }
 
     fn handle_transport_event(
         &mut self,
+        fd: RawFd,
         res_id: ResourceId,
         event: <Self::Transport as Resource>::Event,
         time: Timestamp,
     ) {
         match event {
-            SessionEvent::Established(fd, artifact) => {
+            SessionEvent::Established(artifact) => {
                 // SAFETY: With the NoiseXK protocol, there is always a remote static key.
                 let remote_id = artifact
                     .remote_id()
@@ -477,7 +494,7 @@ impl<
                 }
 
                 loop {
-                    match marshaller.pop::<C::Frame>() {
+                    match marshaller.pop::<C::InFrame>() {
                         Ok(Some(frame)) => {
                             self.controller.on_frame(frame);
                         }

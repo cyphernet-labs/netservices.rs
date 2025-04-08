@@ -196,7 +196,7 @@ where S: Send
 /// An event happening for a [`NetTransport`] network transport and delivered to
 /// a [`reactor::Handler`].
 pub enum SessionEvent<S: NetSession> {
-    Established(RawFd, S::Artifact),
+    Established(S::Artifact),
     Data(Vec<u8>),
     Terminated(io::Error),
 }
@@ -496,7 +496,6 @@ impl<S: NetSession> Resource for NetTransport<S> {
             self.write_intent = true;
             self.state = TransportState::Active;
             Some(SessionEvent::Established(
-                self.as_raw_fd(),
                 self.session.artifact().expect("session is established"),
             ))
         } else {

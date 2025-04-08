@@ -14,7 +14,7 @@ readme = "README.md"
 
 [dependencies]
 amplify = "4.7.0"
-io-reactor = { version = "0.5.2", optional = true }
+io-reactor = { version = "0.6.0", optional = true }
 cyphernet = { version = "0.5.2", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets", "dns"] }
 mio = { version = "1.0.0", optional = true }
 socket2 = { version = "0.5.7", optional = true, features = ["all"] }
@@ -39,6 +39,6 @@ features = []
 rustc-args = ["--cfg", "docsrs"]
 
 [patch.crates-io]
-io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "terminate" }
+io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "v0.6" }
 cyphergraphy = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }
 cypheraddr = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }

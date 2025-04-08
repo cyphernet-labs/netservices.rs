@@ -262,14 +262,20 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
         }
     }
 
-    fn handle_listener_event(&mut self, _: ResourceId, _: (), _: Timestamp) {
+    fn handle_listener_event(&mut self, _: RawFd, _: ResourceId, _: (), _: Timestamp) {
         unreachable!("there is no listener in client")
     }
 
-    fn handle_transport_event(&mut self, id: ResourceId, event: SessionEvent<S>, time: Timestamp) {
+    fn handle_transport_event(
+        &mut self,
+        fd: RawFd,
+        id: ResourceId,
+        event: SessionEvent<S>,
+        time: Timestamp,
+    ) {
         debug_assert_eq!(self.connection_id, Some(id));
         match event {
-            SessionEvent::Established(fd, artifact) => {
+            SessionEvent::Established(artifact) => {
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices-client", "established connection to server (fd={fd}, time={time}), notifying delegate");
 

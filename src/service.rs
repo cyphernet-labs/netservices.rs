@@ -526,9 +526,12 @@ impl<
     fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) {
         match ty {
             ResourceType::Listener => {
-                if let Some(local_addr) = self.listening.remove(&fd) {
-                    self.controller.on_listening(local_addr);
-                }
+                #[cfg(feature = "log")]
+                log::trace!(target: NAME, "Listener with fd={fd}, id={id} is registered");
+                let Some(local_addr) = self.listening.remove(&fd) else {
+                    panic!("Listener with id={} not found", id);
+                };
+                self.controller.on_listening(local_addr);
             }
             ResourceType::Transport => {
                 if let Some(outbound) = self.outbound.get_mut(&fd) {

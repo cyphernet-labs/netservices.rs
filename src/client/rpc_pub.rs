@@ -27,7 +27,7 @@ use std::io;
 
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect, RpcDelegate};
 use crate::client::rpc::{RpcCb, RpcReply, RpcService};
-use crate::{ImpossibleResource, NetSession, NetTransport};
+use crate::{Frame, ImpossibleResource, NetSession, NetTransport};
 
 /// Tag byte signifying RPC server reply.
 pub const CLIENT_MSG_ID_RPC: u8 = 0x01u8;
@@ -207,11 +207,11 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, RpcCb
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct RpcPubClient<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> {
+pub struct RpcPubClient<Req: Frame, Rep: Frame + 'static> {
     inner: Client<Req, RpcCb<Rep>>,
 }
 
-impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep> {
+impl<Req: Frame, Rep: Frame + 'static> RpcPubClient<Req, Rep> {
     /// Constructs new client for RPC+Pub protocol. Takes service callback delegate and remote
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.

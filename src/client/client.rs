@@ -37,7 +37,7 @@ use std::{io, mem};
 use reactor::poller::popol;
 use reactor::{Action, Error, Reactor, ResourceId, ResourceType, Timestamp};
 
-use crate::{Direction, ImpossibleResource, NetSession, NetTransport, SessionEvent};
+use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
 /// The commands which are internally exchanged between [`Client`] runtime on the main thread and
 /// [`ClientService`] existing inside the reactor thread.
@@ -111,7 +111,7 @@ pub trait ConnectionDelegate<A, S: NetSession>: Send {
 /// Set of callbacks used by the client to notify the business logic about server messages.
 pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, S> {
     /// The reply type which must be parsable from a byte blob.
-    type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
+    type Reply: Frame;
 
     /// Called before data are sent to the remote server. Provides a way for specific client-server
     /// message workflows to use extra data (like callbacks called on the server reply) and modify
@@ -125,7 +125,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, 
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
-    fn on_reply_unparsable(&mut self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
+    fn on_reply_unparsable(&mut self, err: <Self::Reply as Frame>::Error);
 }
 
 /// Handler for the client-server connection reactor on the client side. Manages state of the server
@@ -282,12 +282,16 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
                 debug_assert_eq!(self.connection_fd, Some(fd));
                 self.delegate.on_established(artifact, self.attempts);
             }
-            SessionEvent::Data(data) => match D::Reply::try_from(data) {
-                Ok(reply) => {
+            SessionEvent::Data(data) => match D::Reply::unmarshall(io::Cursor::new(data)) {
+                Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
                     log::trace!(target: "netservices-client", "received reply from the server at {time}");
 
                     self.delegate.on_reply(reply)
+                }
+                Ok(None) => {
+                    #[cfg(feature = "log")]
+                    log::trace!(target: "netservices-client", "received partial reply data from the server at {time}");
                 }
                 Err(err) => {
                     #[cfg(feature = "log")]
@@ -384,12 +388,12 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct Client<Req: Into<Vec<u8>>, E: Send = ()> {
+pub struct Client<Req: Frame, E: Send = ()> {
     reactor: Reactor<ClientCommand<E>, popol::Poller>,
     _phantom: PhantomData<Req>,
 }
 
-impl<Req: Into<Vec<u8>>, E> Client<Req, E>
+impl<Req: Frame, E> Client<Req, E>
 where E: Send + 'static
 {
     /// Constructs new client for client-server protocol. Takes service callback delegate and remote
@@ -419,11 +423,13 @@ where E: Send + 'static
     pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.reactor.join() }
 
     pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
-        self.reactor.controller().cmd(ClientCommand::Send(data.into(), extra))
+        let mut buf = Vec::new();
+        data.marshall(&mut buf).expect("failed to marshall request");
+        self.reactor.controller().cmd(ClientCommand::Send(buf, extra))
     }
 }
 
-impl<Req: Into<Vec<u8>>> Client<Req> {
+impl<Req: Frame> Client<Req> {
     /// Sends a new request to the server.
     pub fn send(&self, req: Req) -> io::Result<()> { self.send_extra(req, ()) }
 }

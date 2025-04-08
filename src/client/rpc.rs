@@ -27,10 +27,11 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::io;
+use std::io::{Read, Write};
 use std::marker::PhantomData;
 
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
-use crate::{ImpossibleResource, NetSession, NetTransport};
+use crate::{Frame, ImpossibleResource, NetSession, NetTransport};
 
 /// RPC callback type, which is a function closure taking single argument - sever reply message. The
 /// closure must be sendable between threads and is called in the context of the reactor thread.
@@ -38,12 +39,33 @@ pub type RpcCb<Rep> = Box<dyn FnOnce(Rep) + Send>;
 
 /// Server RPC reply.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct RpcReply {
+pub struct RpcReply<R> {
     /// Message id, representing related RPC request.
     pub id: u64,
     /// Unparsed message data.
-    pub payload: Vec<u8>,
+    pub payload: R,
 }
+
+/*
+impl<R> Frame for RpcReply<R> {
+    type Error = DecodeError;
+
+    fn unmarshall(reader: impl Read) -> Result<Option<Self>, Self::Error> {
+        let mut reader = StrictReader::with(StreamReader::new::<U24MAX>(reader));
+        match Self::strict_decode(&mut reader) {
+            Ok(request) => Ok(Some(request)),
+            Err(DecodeError::Io(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn marshall(&self, writer: impl Write) -> Result<(), Self::Error> {
+        let writer = StrictWriter::with(StreamWriter::new::<U24MAX>(writer));
+        self.strict_encode(writer)?;
+        Ok(())
+    }
+}
+ */
 
 /// Errors parsing server message [`RpcReply`] from the raw bytes received from the server.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display, Error)]
@@ -54,35 +76,6 @@ pub enum ParseReplyError {
 
     /// the received message is too short and doesn't provide RPC identifier.
     NoId,
-}
-
-impl TryFrom<Vec<u8>> for RpcReply {
-    type Error = ParseReplyError;
-
-    fn try_from(data: Vec<u8>) -> Result<Self, Self::Error> {
-        if data.is_empty() {
-            return Err(ParseReplyError::Empty);
-        };
-        let mut data = &data[..];
-        if data.len() < 8 {
-            return Err(ParseReplyError::NoId);
-        };
-        let mut id = [0u8; 8];
-        id.copy_from_slice(&data[0..8]);
-        data = &data[8..];
-        let id = u64::from_le_bytes(id);
-        let payload = data.to_vec();
-        Ok(RpcReply { id, payload })
-    }
-}
-
-impl From<RpcReply> for Vec<u8> {
-    fn from(msg: RpcReply) -> Self {
-        let mut data = Vec::with_capacity(msg.payload.len() + 8);
-        data.extend(msg.id.to_le_bytes());
-        data.extend(msg.payload);
-        data
-    }
 }
 
 /// Error processing servr message.
@@ -100,7 +93,7 @@ pub enum RpcReplyError {
 /// Set of callbacks used by the RPC client to notify business logic about server messages.
 pub trait RpcDelegate<A: Send, S: NetSession>: ConnectionDelegate<A, S> {
     /// The RPC reply type which must be parsable from a byte blob.
-    type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
+    type Reply: Frame;
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`RpcReply`] type.
@@ -152,7 +145,7 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ConnectionDelegate<A, S>
 impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D::Reply>>
     for RpcService<A, S, D>
 {
-    type Reply = RpcReply;
+    type Reply = RpcReply<D::Reply>;
 
     fn before_send(&mut self, data: Vec<u8>, cb: RpcCb<D::Reply>) -> Vec<u8> {
         let id = self.last_id;
@@ -168,16 +161,17 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
         req
     }
 
-    fn on_reply(&mut self, msg: RpcReply) {
+    fn on_reply(&mut self, msg: RpcReply<D::Reply>) {
         let id = msg.id;
         if let Some(cb) = self.callbacks.remove(&id) {
-            match D::Reply::try_from(msg.payload) {
-                Ok(reply) => {
+            match D::Reply::unmarshall(io::Cursor::new(msg.payload)) {
+                Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
                     log::trace!(target: "netservices-client", "received RPC reply for the request with RPC id={id}. Calling callback.");
 
                     cb(reply)
                 }
+                Ok(None) => unreachable!(),
                 Err(e) => {
                     #[cfg(feature = "log")]
                     log::error!(target: "netservices-client", "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
@@ -203,11 +197,11 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct RpcClient<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> {
+pub struct RpcClient<Req: Frame, Rep: TryFrom<Vec<u8>> + 'static> {
     inner: Client<Req, RpcCb<Rep>>,
 }
 
-impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcClient<Req, Rep> {
+impl<Req: Frame, Rep: TryFrom<Vec<u8>> + 'static> RpcClient<Req, Rep> {
     /// Constructs new client for RPC protocol. Takes service callback delegate and remote
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.

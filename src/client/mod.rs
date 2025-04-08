@@ -20,9 +20,9 @@
 // limitations under the License.
 
 mod client;
-pub mod rpc;
-pub mod rpc_pub;
+//pub mod rpc;
+//pub mod rpc_pub;
 
 pub use client::{Client, ClientCommand, ClientDelegate, ConnectionDelegate, OnDisconnect};
-pub use rpc::{RpcClient, RpcDelegate};
-pub use rpc_pub::{RpcPubClient, RpcPubDelegate, RpcPubId, CLIENT_MSG_ID_PUB, CLIENT_MSG_ID_RPC};
+//pub use rpc::{RpcClient, RpcDelegate};
+//pub use rpc_pub::{RpcPubClient, RpcPubDelegate, RpcPubId, CLIENT_MSG_ID_PUB, CLIENT_MSG_ID_RPC};

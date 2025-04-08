@@ -29,7 +29,7 @@ pub trait Frame: Send + Sized {
     ///
     /// If the stream doesn't contain the whole message yet must return `Ok(None)`
     fn unmarshall(reader: impl Read) -> Result<Option<Self>, Self::Error>;
-    fn marshall(&self, writer: impl Write) -> Result<usize, Self::Error>;
+    fn marshall(&self, writer: impl Write) -> Result<(), Self::Error>;
 }
 
 #[derive(Clone, Debug, Default)]

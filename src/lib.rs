@@ -23,8 +23,6 @@
 
 #[macro_use]
 extern crate amplify;
-#[cfg(feature = "log")]
-extern crate log_crate as log;
 
 pub mod frame;
 

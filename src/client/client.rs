@@ -66,9 +66,11 @@ pub enum ClientCommand<E: Send = ()> {
 impl<E: Send> Debug for ClientCommand<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ClientCommand::Send(data, _) => {
-                f.debug_tuple("ClientCommand::Send").field(data).field(&"<extra>").finish()
-            }
+            ClientCommand::Send(data, _) => f
+                .debug_tuple("ClientCommand::Send")
+                .field(data)
+                .field(&"<extra>")
+                .finish(),
             ClientCommand::Terminate => f.debug_tuple("ClientCommand::Terminate").finish(),
         }
     }
@@ -212,7 +214,8 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
                     #[cfg(feature = "log")]
                     log::info!(target: NAME, "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
 
-                    self.action_queue.push_back(Action::RegisterTransport(transport));
+                    self.action_queue
+                        .push_back(Action::RegisterTransport(transport));
                     break;
                 }
                 Err(err) => {
@@ -332,7 +335,8 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
         log::trace!(target: NAME, "scheduling sending {} buffered messages to the server", self.data_stack.len());
         let mut data_stack = vec![];
         mem::swap(&mut data_stack, &mut self.data_stack);
-        self.action_queue.extend(data_stack.into_iter().map(|data| Action::Send(id, data)));
+        self.action_queue
+            .extend(data_stack.into_iter().map(|data| Action::Send(id, data)));
     }
 
     fn handle_command(&mut self, cmd: Self::Command) {
@@ -407,10 +411,7 @@ where E: Send + 'static
     ) -> io::Result<Self> {
         let service = ClientService::<A, S, D, E>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
-        Ok(Self {
-            reactor,
-            _phantom: PhantomData,
-        })
+        Ok(Self { reactor, _phantom: PhantomData })
     }
 
     /// Terminates the client, disconnecting from the server and stopping the reactor thread.
@@ -427,7 +428,9 @@ where E: Send + 'static
     pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
         let mut buf = Vec::new();
         data.marshall(&mut buf).expect("failed to marshall request");
-        self.reactor.controller().cmd(ClientCommand::Send(buf, extra))
+        self.reactor
+            .controller()
+            .cmd(ClientCommand::Send(buf, extra))
     }
 }
 

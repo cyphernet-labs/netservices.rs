@@ -152,11 +152,11 @@ struct Service<
 }
 
 impl<
-        S: NetSession,
-        L: NetListener<Stream = S::Connection>,
-        C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
-        Cmd: Send,
-    > Service<S, L, C, Cmd>
+    S: NetSession,
+    L: NetListener<Stream = S::Connection>,
+    C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
+    Cmd: Send,
+> Service<S, L, C, Cmd>
 {
     pub fn new(node_id: <S::Artifact as Artifact>::NodeId, controller: C) -> Self {
         Self {
@@ -173,7 +173,8 @@ impl<
     }
 
     pub fn listen(&mut self, socket: NetAccept<S, L>) {
-        self.listening.insert(socket.as_raw_fd(), socket.local_addr());
+        self.listening
+            .insert(socket.as_raw_fd(), socket.local_addr());
         self.actions.push_back(Action::RegisterListener(socket));
     }
 
@@ -197,21 +198,13 @@ impl<
                     .map(|o| (o.remote_id, Direction::Outbound))
             }
             Entry::Occupied(mut entry) => match entry.get() {
-                Remote::Disconnecting {
-                    remote_id,
-                    direction,
-                    ..
-                } => {
+                Remote::Disconnecting { remote_id, direction, .. } => {
                     #[cfg(feature = "log")]
                     log::error!(target: NAME, "Remote with id={res_id} is already disconnecting");
 
                     remote_id.as_ref().map(|id| (*id, *direction))
                 }
-                Remote::Connected {
-                    remote_id,
-                    direction,
-                    ..
-                } => {
+                Remote::Connected { remote_id, direction, .. } => {
                     #[cfg(feature = "log")]
                     log::debug!(target: NAME, "Disconnecting remote with id={res_id}: {reason}");
 
@@ -251,11 +244,11 @@ impl<
 }
 
 impl<
-        S: NetSession,
-        L: NetListener<Stream = S::Connection>,
-        C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
-        Cmd: Debug + Send,
-    > reactor::Handler for Service<S, L, C, Cmd>
+    S: NetSession,
+    L: NetListener<Stream = S::Connection>,
+    C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
+    Cmd: Debug + Send,
+> reactor::Handler for Service<S, L, C, Cmd>
 {
     type Listener = NetAccept<S, L>;
     type Transport = NetTransport<S>;
@@ -296,7 +289,10 @@ impl<
                 }
 
                 let session =
-                    match self.controller.establish_session(remote.clone(), connection, time) {
+                    match self
+                        .controller
+                        .establish_session(remote.clone(), connection, time)
+                    {
                         Ok(s) => s,
                         #[allow(unused_variables)]
                         Err(err) => {
@@ -317,14 +313,15 @@ impl<
                 #[cfg(feature = "log")]
                 log::debug!(target: NAME, "Accepted inbound connection from {remote} (fd={fd})");
 
-                self.inbound.insert(fd, Inbound {
-                    res_id: None,
-                    addr: remote.clone(),
-                });
+                self.inbound
+                    .insert(fd, Inbound { res_id: None, addr: remote.clone() });
                 self.actions.push_back(Action::RegisterTransport(transport))
             }
             ListenerEvent::Failure(err) => {
-                let listener = self.listening.get(&listener_fd).expect("listener must exist");
+                let listener = self
+                    .listening
+                    .get(&listener_fd)
+                    .expect("listener must exist");
                 let addr = listener.to_socket_addr();
                 #[cfg(feature = "log")]
                 log::error!(target: NAME, "Error accepting an inbound connection on {addr} (fd={listener_fd}): {err}");
@@ -355,7 +352,10 @@ impl<
                     return;
                 }
                 let (addr, direction) = if let Some(remote) = self.inbound.remove(&fd) {
-                    self.metrics.entry(remote_id).or_default().inbound_connection_attempts += 1;
+                    self.metrics
+                        .entry(remote_id)
+                        .or_default()
+                        .inbound_connection_attempts += 1;
                     (remote.addr, Direction::Inbound)
                 } else if let Some(remote) = self.outbound.remove(&fd) {
                     assert_eq!(remote_id, remote.remote_id);
@@ -463,15 +463,13 @@ impl<
                 if !disconnect.contains(&res_id) {
                     self.remotes
                         .insert(res_id, Remote::connected(remote_id, addr.clone(), direction));
-                    self.controller.on_established(remote_id, addr, direction, time);
+                    self.controller
+                        .on_established(remote_id, addr, direction, time);
                 }
             }
             SessionEvent::Data(data) => {
-                let Some(Remote::Connected {
-                    remote_id,
-                    marshaller,
-                    ..
-                }) = self.remotes.get_mut(&res_id)
+                let Some(Remote::Connected { remote_id, marshaller, .. }) =
+                    self.remotes.get_mut(&res_id)
                 else {
                     #[cfg(feature = "log")]
                     log::warn!(target: NAME, "Dropping message from unconnected remote (id={res_id})");
@@ -608,12 +606,7 @@ impl<
         match self.remotes.entry(res_id) {
             Entry::Occupied(entry) => {
                 match entry.get() {
-                    Remote::Disconnecting {
-                        remote_id,
-                        reason,
-                        direction,
-                        ..
-                    } => {
+                    Remote::Disconnecting { remote_id, reason, direction, .. } => {
                         #[cfg(feature = "log")]
                         log::debug!(target: NAME, "Transport handover for disconnecting remote with id={res_id} (fd={fd})");
 
@@ -628,7 +621,8 @@ impl<
                             //
                             // Therefore, we specify which of the connections we're closing by
                             // passing the `link`.
-                            self.controller.on_disconnected(*remote_id, *direction, reason);
+                            self.controller
+                                .on_disconnected(*remote_id, *direction, reason);
                         }
                         entry.remove();
                     }
@@ -646,11 +640,11 @@ impl<
 }
 
 impl<
-        S: NetSession,
-        L: NetListener<Stream = S::Connection>,
-        C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
-        Cmd: Send,
-    > Iterator for Service<S, L, C, Cmd>
+    S: NetSession,
+    L: NetListener<Stream = S::Connection>,
+    C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
+    Cmd: Send,
+> Iterator for Service<S, L, C, Cmd>
 {
     type Item = Action<NetAccept<S, L>, NetTransport<S>>;
 
@@ -695,7 +689,10 @@ impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {
     /// Terminates the node, closing all connections, unbinding listeners and stopping the reactor
     /// thread.
     pub fn shutdown(self) -> Result<(), Box<dyn Any + Send>> {
-        self.reactor.controller().shutdown().map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
+        self.reactor
+            .controller()
+            .shutdown()
+            .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
         self.reactor.join()?;
         Ok(())
     }

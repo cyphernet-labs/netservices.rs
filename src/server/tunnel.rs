@@ -56,7 +56,10 @@ impl<S: NetSession> Tunnel<S> {
         mut poller: P,
         timeout: Duration,
     ) -> io::Result<(usize, usize)> {
-        let listener_addr = self.listener.local_addr().expect("listener always has local addr");
+        let listener_addr = self
+            .listener
+            .local_addr()
+            .expect("listener always has local addr");
         #[cfg(feature = "log")]
         log::info!(target: NAME, "Tunnel accepting a single connection will run on {listener_addr}");
 

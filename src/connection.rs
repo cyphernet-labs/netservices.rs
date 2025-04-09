@@ -90,7 +90,10 @@ impl NetConnection for TcpStream {
     type Addr = NetAddr<InetHost>;
 
     fn connect_blocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
-        let socket_addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let socket_addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         TcpStream::connect_timeout(&socket_addr, timeout)
     }
 
@@ -158,7 +161,10 @@ impl NetConnection for socket2::Socket {
 
     #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr, _timeout: Duration) -> io::Result<Self> {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_nonblocking(true)?;
@@ -194,9 +200,14 @@ impl NetConnection for socket2::Socket {
         local_addr: Self::Addr,
         remote_addr: Self::Addr,
     ) -> io::Result<Self> {
-        let local_addr = local_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
-        let remote_addr =
-            remote_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let local_addr = local_addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        let remote_addr = remote_addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(local_addr),
             socket2::Type::STREAM,

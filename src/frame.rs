@@ -39,12 +39,7 @@ pub struct Marshaller {
 }
 
 impl Marshaller {
-    pub fn new() -> Self {
-        Self {
-            read_queue: VecDeque::new(),
-            write_queue: VecDeque::new(),
-        }
-    }
+    pub fn new() -> Self { Self { read_queue: VecDeque::new(), write_queue: VecDeque::new() } }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -54,7 +49,9 @@ impl Marshaller {
     }
 
     pub fn push<F: Frame>(&mut self, frame: F) {
-        frame.marshall(&mut self.write_queue).expect("in-memory write operation");
+        frame
+            .marshall(&mut self.write_queue)
+            .expect("in-memory write operation");
     }
 
     pub fn pop<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {

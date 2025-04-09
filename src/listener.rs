@@ -97,7 +97,10 @@ impl NetListener for socket2::Socket {
 
     fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket2::Socket::bind(&socket, &addr.into())?;
@@ -106,7 +109,10 @@ impl NetListener for socket2::Socket {
 
     fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_reuse_address(true)?;

@@ -113,20 +113,11 @@ impl SplitIo for TcpStream {
         match self.try_clone() {
             Ok(clone) => {
                 let unique_id = rand::random();
-                let reader = TcpReader {
-                    unique_id,
-                    connection: clone,
-                };
-                let writer = TcpWriter {
-                    unique_id,
-                    connection: self,
-                };
+                let reader = TcpReader { unique_id, connection: clone };
+                let writer = TcpWriter { unique_id, connection: self };
                 Ok((reader, writer))
             }
-            Err(error) => Err(SplitIoError {
-                original: self,
-                error,
-            }),
+            Err(error) => Err(SplitIoError { original: self, error }),
         }
     }
 
@@ -147,20 +138,11 @@ impl SplitIo for socket2::Socket {
         match self.try_clone() {
             Ok(clone) => {
                 let unique_id = rand::random();
-                let reader = TcpReader {
-                    unique_id,
-                    connection: clone,
-                };
-                let writer = TcpWriter {
-                    unique_id,
-                    connection: self,
-                };
+                let reader = TcpReader { unique_id, connection: clone };
+                let writer = TcpWriter { unique_id, connection: self };
                 Ok((reader, writer))
             }
-            Err(error) => Err(SplitIoError {
-                original: self,
-                error,
-            }),
+            Err(error) => Err(SplitIoError { original: self, error }),
         }
     }
 

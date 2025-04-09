@@ -20,7 +20,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{hash_map, HashMap};
+use std::collections::{HashMap, hash_map};
 use std::fmt::{self, Debug};
 use std::sync::Arc;
 
@@ -107,12 +107,9 @@ pub enum Remote<A: Addr, I: NodeId> {
 impl<A: Addr + Debug, I: NodeId> Debug for Remote<A, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Connected {
-                addr,
-                remote_id: id,
-                direction,
-                ..
-            } => write!(f, "Connected({direction}, {addr:?}, {id})"),
+            Self::Connected { addr, remote_id: id, direction, .. } => {
+                write!(f, "Connected({direction}, {addr:?}, {id})")
+            }
             Self::Disconnecting { .. } => write!(f, "Disconnecting"),
         }
     }
@@ -123,13 +120,8 @@ impl<A: Addr, I: NodeId> Remote<A, I> {
     pub fn remote_id(&self) -> Option<I> {
         match self {
             Self::Connected { remote_id, .. }
-            | Self::Disconnecting {
-                remote_id: Some(remote_id),
-                ..
-            } => Some(*remote_id),
-            Self::Disconnecting {
-                remote_id: None, ..
-            } => None,
+            | Self::Disconnecting { remote_id: Some(remote_id), .. } => Some(*remote_id),
+            Self::Disconnecting { remote_id: None, .. } => None,
         }
     }
 
@@ -200,11 +192,7 @@ impl<A: Addr, I: NodeId> Remotes<A, I> {
 
     pub fn active(&self) -> impl Iterator<Item = (ResourceId, &I, Direction)> {
         self.0.iter().filter_map(|(res_id, remote)| match remote {
-            Remote::Connected {
-                remote_id: id,
-                direction,
-                ..
-            } => Some((*res_id, id, *direction)),
+            Remote::Connected { remote_id: id, direction, .. } => Some((*res_id, id, *direction)),
             Remote::Disconnecting { .. } => None,
         })
     }

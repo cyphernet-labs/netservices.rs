@@ -145,10 +145,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
-        Ok(Self {
-            listener,
-            _phantom: default!(),
-        })
+        Ok(Self { listener, _phantom: default!() })
     }
 
     /// Binds listener to the provided socket address(es) with a given context. Same as
@@ -158,10 +155,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     pub fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind_reusable(addr)?;
         listener.set_nonblocking(true)?;
-        Ok(Self {
-            listener,
-            _phantom: default!(),
-        })
+        Ok(Self { listener, _phantom: default!() })
     }
 
     /// Returns the local [`net::SocketAddr`] on which listener accepts
@@ -306,8 +300,12 @@ impl<S: NetSession> NetTransport<S> {
         state: TransportState,
         link_direction: Direction,
     ) -> io::Result<Self> {
-        session.as_connection_mut().set_read_timeout(Some(READ_TIMEOUT))?;
-        session.as_connection_mut().set_write_timeout(Some(WRITE_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_read_timeout(Some(READ_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
             state,
             session,
@@ -334,7 +332,9 @@ impl<S: NetSession> NetTransport<S> {
     pub fn artifact(&self) -> Option<S::Artifact> { self.session.artifact() }
 
     pub fn expect_peer_id(&self) -> S::Artifact {
-        self.session.artifact().expect("session is expected to be established at this stage")
+        self.session
+            .artifact()
+            .expect("session is expected to be established at this stage")
     }
 
     pub fn write_buf_len(&self) -> usize { self.write_buffer.len() }

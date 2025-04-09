@@ -62,15 +62,10 @@ pub trait ServiceController<
     S: NetSession,
     L: NetListener<Stream = S::Connection>,
     Cmd,
->: Send
+>: Send + Iterator<Item = Action<NetAccept<S, L>, NetTransport<S>>>
 {
     /// Framing for incoming messages
     type InFrame: Frame;
-
-    // TODO: Replace with passing sender object
-    fn extract_actions(
-        &mut self,
-    ) -> impl IntoIterator<Item = Action<NetAccept<S, L>, NetTransport<S>>>;
 
     fn should_accept(&mut self, remote: &A, time: Timestamp) -> bool;
 
@@ -659,8 +654,7 @@ impl<
     type Item = Action<NetAccept<S, L>, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: Remove once sender refactoring is complete
-        self.actions.extend(self.controller.extract_actions());
+        self.actions.extend(&mut self.controller);
         self.actions.pop_front()
     }
 }

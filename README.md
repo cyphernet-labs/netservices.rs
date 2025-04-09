@@ -1,4 +1,4 @@
-# Cyphernet network services: library for privacy-preserving microservices.
+# Cyphernet network services: library for privacy-preserving networking.
 
 ![Build](https://github.com/Cyphernet-Labs/netservices.rs/workflows/Build/badge.svg)
 ![Tests](https://github.com/Cyphernet-Labs/netservices.rs/workflows/Tests/badge.svg)
@@ -9,8 +9,8 @@
 [![Docs](https://docs.rs/netservices/badge.svg)](https://docs.rs/netservices)
 [![Apache-2 licensed](https://img.shields.io/crates/l/netservices)](./LICENSE)
 
-A set of tools for building scalable microservice-based apps and P2P nodes in a
-privacy-preserving way using [`cyphernet`] library with its Noise protocol
+A set of tools for building scalable networking apps, servers and P2P nodes in
+a privacy-preserving way using [`cyphernet`] library with its Noise protocol
 framework end-to-end encryption, mixnet support, P2P decentralized node ids,
 [`io-reactor`] concurrent scalable network services.
 

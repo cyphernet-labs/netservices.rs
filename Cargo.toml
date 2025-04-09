@@ -7,8 +7,8 @@ keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
 categories = ["network-programming", "cryptography", "concurrency"]
 homepage = "https://cyphernet.org"
 repository = "https://github.com/Cyphernet-Labs/netservices.rs"
-rust-version = "1.69"
-edition = "2021"
+rust-version = "1.85.0"
+edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
 

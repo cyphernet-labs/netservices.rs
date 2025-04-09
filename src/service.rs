@@ -138,6 +138,7 @@ struct Service<
     controller: C,
     listening: HashMap<RawFd, net::SocketAddr>,
     inbound: HashMap<RawFd, Inbound<<S::Connection as NetConnection>::Addr>>,
+    #[allow(clippy::type_complexity)]
     outbound: HashMap<
         RawFd,
         Outbound<<S::Connection as NetConnection>::Addr, <S::Artifact as Artifact>::NodeId>,
@@ -193,7 +194,7 @@ impl<
                 self.outbound
                     .values()
                     .find(|o| o.res_id == Some(res_id))
-                    .map(|o| (o.remote_id.clone(), Direction::Outbound))
+                    .map(|o| (o.remote_id, Direction::Outbound))
             }
             Entry::Occupied(mut entry) => match entry.get() {
                 Remote::Disconnecting {
@@ -204,7 +205,7 @@ impl<
                     #[cfg(feature = "log")]
                     log::error!(target: NAME, "Remote with id={res_id} is already disconnecting");
 
-                    remote_id.as_ref().map(|id| (id.clone(), *direction))
+                    remote_id.as_ref().map(|id| (*id, *direction))
                 }
                 Remote::Connected {
                     remote_id,

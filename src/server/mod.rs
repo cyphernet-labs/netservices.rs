@@ -20,6 +20,7 @@
 // limitations under the License.
 
 pub mod tunnel;
+#[allow(clippy::module_inception)]
 mod server;
 //pub mod rpc;
 pub mod rpc_pub;

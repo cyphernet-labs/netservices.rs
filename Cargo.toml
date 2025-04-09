@@ -1,12 +1,12 @@
 [package]
 name = "netservices"
 description = "Library for building scalable privacy-preserving microservices P2P nodes"
-version = "0.9.0"
+version = "0.11.0"
 authors = ["Dr. Maxim Orlovsky <orlovsky@cyphernet.org>"]
 keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
 categories = ["network-programming", "cryptography", "concurrency"]
 homepage = "https://cyphernet.org"
-repository = "https://github.com/Cyphernet-DAO/rust-netservices"
+repository = "https://github.com/Cyphernet-Labs/netservices.rs"
 rust-version = "1.69"
 edition = "2021"
 license = "Apache-2.0"

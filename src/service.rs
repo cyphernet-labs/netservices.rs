@@ -40,7 +40,7 @@ use crate::{
     NetTransport, SessionEvent,
 };
 
-const NAME: &str = "service";
+const NAME: &str = "net-service";
 
 // TODO: Do a proper metrics measurements
 // TODO: Consider collecting metrics using Marshaller; move (dis)connection counting to business

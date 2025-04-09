@@ -178,7 +178,7 @@ impl<A: Addr, I: NodeId> Remotes<A, I> {
     pub fn insert(&mut self, res_id: ResourceId, peer: Remote<A, I>) {
         if self.0.insert(res_id, peer).is_some() {
             #[cfg(feature = "log")]
-            log::warn!(target: "node-service", "Replacing existing remote with resource id {res_id}");
+            log::warn!(target: "remotes", "Replacing existing remote with resource id {res_id}");
         }
     }
 

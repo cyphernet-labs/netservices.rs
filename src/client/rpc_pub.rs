@@ -29,6 +29,8 @@ use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect, RpcDelegat
 use crate::client::rpc::{RpcCb, RpcReply, RpcService};
 use crate::{Frame, ImpossibleResource, NetSession, NetTransport};
 
+const NAME: &str = "net-rpcpub";
+
 /// Tag byte signifying RPC server reply.
 pub const CLIENT_MSG_ID_RPC: u8 = 0x01u8;
 /// Tag byte signifying Pub server message.
@@ -183,13 +185,13 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, RpcCb
             RpcPubId::Pub(id) => match D::PubMsg::try_from(msg.payload) {
                 Ok(msg_pub) => {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "received Pub message with Pub id={id}. Notifying the delegate.");
+                    log::trace!(target: NAME, "received Pub message with Pub id={id}. Notifying the delegate.");
 
                     self.inner.delegate.on_msg_pub(id, msg_pub)
                 }
                 Err(e) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "received unparsable Pub message from the server with Pub id={id}. Parse error: {e}");
+                    log::error!(target: NAME, "received unparsable Pub message from the server with Pub id={id}. Parse error: {e}");
 
                     self.inner.delegate.on_msg_error(RpcPubError::UnparsablePub(id, e.to_string()))
                 }
@@ -199,7 +201,7 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, RpcCb
 
     fn on_reply_unparsable(&mut self, err: ParseRpcPubError) {
         #[cfg(feature = "log")]
-        log::error!(target: "netservices-client", "received unparsable server message. Parse error: {err}");
+        log::error!(target: NAME, "received unparsable server message. Parse error: {err}");
 
         self.inner.delegate.on_msg_error(RpcPubError::UnparsableMsg(err))
     }

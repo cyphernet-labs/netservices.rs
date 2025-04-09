@@ -39,6 +39,8 @@ use reactor::{Action, Error, Reactor, ResourceId, ResourceType, Timestamp};
 
 use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
+const NAME: &str = "net-client";
+
 /// The commands which are internally exchanged between [`Client`] runtime on the main thread and
 /// [`ClientService`] existing inside the reactor thread.
 ///
@@ -175,7 +177,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     #[inline]
     pub fn new(delegate: D, remote: A) -> Self {
         #[cfg(feature = "log")]
-        log::debug!(target: "netservices-client", "constructing client service object and scheduling connection timer");
+        log::debug!(target: NAME, "constructing client service object and scheduling connection timer");
         Self {
             delegate,
             remote,
@@ -196,31 +198,31 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     fn connect(&mut self) {
         if self.active {
             #[cfg(feature = "log")]
-            log::error!(target: "netservices-client", "calling connect method while the server connection exists (or has been establishing)");
+            log::error!(target: NAME, "calling connect method while the server connection exists (or has been establishing)");
             return;
         }
         self.active = true;
         loop {
             #[cfg(feature = "log")]
-            log::info!(target: "netservices-client", "attempting to connect the server for the {} time", self.attempts + 1);
+            log::info!(target: NAME, "attempting to connect the server for the {} time", self.attempts + 1);
 
             let session = self.delegate.connect(&self.remote);
             match NetTransport::with_session(session, Direction::Outbound) {
                 Ok(transport) => {
                     #[cfg(feature = "log")]
-                    log::info!(target: "netservices-client", "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
+                    log::info!(target: NAME, "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
 
                     self.action_queue.push_back(Action::RegisterTransport(transport));
                     break;
                 }
                 Err(err) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "error connecting to the server: {err}");
+                    log::error!(target: NAME, "error connecting to the server: {err}");
 
                     self.attempts += 1;
                     if self.delegate.on_disconnect(err, self.attempts) == OnDisconnect::Terminate {
                         #[cfg(feature = "log")]
-                        log::debug!(target: "netservices-client", "delegate signalled to terminate the reactor due to unsuccesful server connection");
+                        log::debug!(target: NAME, "delegate signalled to terminate the reactor due to unsuccesful server connection");
 
                         self.terminate();
                         break;
@@ -234,7 +236,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     /// will receive it and close the connection to the server.
     fn terminate(&mut self) {
         #[cfg(feature = "log")]
-        log::info!(target: "netservices-client", "Scheduling to terminate the reactor and client service");
+        log::info!(target: NAME, "Scheduling to terminate the reactor and client service");
 
         self.action_queue.push_back(Action::Terminate);
     }
@@ -249,15 +251,15 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn tick(&mut self, time: Timestamp) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "reactor tick at {time}");
+        log::trace!(target: NAME, "reactor tick at {time}");
     }
 
     fn handle_timer(&mut self) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "reactor timer event");
+        log::trace!(target: NAME, "reactor timer event");
         if !self.active {
             #[cfg(feature = "log")]
-            log::debug!(target: "netservices-client", "attempting to connect to the remote server on the timer event");
+            log::debug!(target: NAME, "attempting to connect to the remote server on the timer event");
             self.connect();
         }
     }
@@ -277,7 +279,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
         match event {
             SessionEvent::Established(artifact) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices-client", "established connection to server (fd={fd}, time={time}), notifying delegate");
+                log::debug!(target: NAME, "established connection to server (fd={fd}, time={time}), notifying delegate");
 
                 debug_assert_eq!(self.connection_fd, Some(fd));
                 self.delegate.on_established(artifact, self.attempts);
@@ -285,17 +287,17 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
             SessionEvent::Data(data) => match D::Reply::unmarshall(io::Cursor::new(data)) {
                 Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "received reply from the server at {time}");
+                    log::trace!(target: NAME, "received reply from the server at {time}");
 
                     self.delegate.on_reply(reply)
                 }
                 Ok(None) => {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "received partial reply data from the server at {time}");
+                    log::trace!(target: NAME, "received partial reply data from the server at {time}");
                 }
                 Err(err) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "unparsable reply from the server at {time}: {}", err);
+                    log::error!(target: NAME, "unparsable reply from the server at {time}: {}", err);
 
                     self.delegate.on_reply_unparsable(err)
                 }
@@ -307,7 +309,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
                 self.attempts += 1;
 
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices-client", "disconnected from the server for the {} time", self.attempts);
+                log::debug!(target: NAME, "disconnected from the server for the {} time", self.attempts);
 
                 if self.delegate.on_disconnect(err, self.attempts) == OnDisconnect::Reconnect {
                     self.connect();
@@ -320,14 +322,14 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
+        log::trace!(target: NAME, "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
         debug_assert_eq!(ty, ResourceType::Transport);
 
         self.connection_fd = Some(fd);
         self.connection_id = Some(id);
 
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "scheduling sending {} buffered messages to the server", self.data_stack.len());
+        log::trace!(target: NAME, "scheduling sending {} buffered messages to the server", self.data_stack.len());
         let mut data_stack = vec![];
         mem::swap(&mut data_stack, &mut self.data_stack);
         self.action_queue.extend(data_stack.into_iter().map(|data| Action::Send(id, data)));
@@ -337,14 +339,14 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
         match cmd {
             ClientCommand::Send(data, extra) => {
                 #[cfg(feature = "log")]
-                log::trace!(target: "netservices-client", "sending data to the server ({} bytes)", data.len());
+                log::trace!(target: NAME, "sending data to the server ({} bytes)", data.len());
 
                 let data = self.delegate.before_send(data, extra);
                 if let Some(id) = self.connection_id {
                     self.action_queue.push_back(Action::Send(id, data));
                 } else {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "buffering the data since the connection is not yet established ({} elements in the stack already)", self.data_stack.len());
+                    log::trace!(target: NAME, "buffering the data since the connection is not yet established ({} elements in the stack already)", self.data_stack.len());
 
                     self.data_stack.push(data);
                 }
@@ -357,7 +359,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
         #[cfg(feature = "log")]
-        log::error!(target: "netservices-client", "I/O error in server connection: {err}");
+        log::error!(target: NAME, "I/O error in server connection: {err}");
 
         self.delegate.on_io_error(err)
     }
@@ -368,7 +370,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handover_transport(&mut self, id: ResourceId, transport: Self::Transport) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "transport {} has been disconnected and handed over (id={id})", transport.display());
+        log::trace!(target: NAME, "transport {} has been disconnected and handed over (id={id})", transport.display());
         debug_assert!(self.connection_fd.is_some());
         debug_assert_eq!(self.connection_id, Some(id));
 

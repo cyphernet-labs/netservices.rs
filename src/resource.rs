@@ -53,6 +53,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 
+const NAME: &str = "transport";
+
 pub enum ImpossibleResource {}
 
 impl AsRawFd for ImpossibleResource {
@@ -339,7 +341,7 @@ impl<S: NetSession> NetTransport<S> {
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Terminating session {self} due to {reason:?}");
+        log::trace!(target: NAME, "Terminating session {self} due to {reason:?}");
 
         self.state = TransportState::Terminated;
         SessionEvent::Terminated(reason)
@@ -365,7 +367,7 @@ impl<S: NetSession> NetTransport<S> {
                 .contains(&err.kind()) =>
             {
                 #[cfg(feature = "log")]
-                log::warn!(target: "transport", "Resource {} was not able to consume any data even though it has announced its write readiness", self.display());
+                log::warn!(target: NAME, "Resource {} was not able to consume any data even though it has announced its write readiness", self.display());
                 self.write_intent = true;
                 None
             }
@@ -387,7 +389,7 @@ impl<S: NetSession> NetTransport<S> {
                 // when there's data on the socket. We leave it here in case external
                 // conditions change.
                 #[cfg(feature = "log")]
-                log::warn!(target: "transport",
+                log::warn!(target: NAME,
                     "WOULD_BLOCK on resource which had read intent - probably normal thing to happen"
                 );
                 None
@@ -399,7 +401,7 @@ impl<S: NetSession> NetTransport<S> {
     fn flush_buffer(&mut self) -> io::Result<()> {
         let orig_len = self.write_buffer.len();
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Resource {} is flushing its buffer of {orig_len} bytes", self.display());
+        log::trace!(target: NAME, "Resource {} is flushing its buffer of {orig_len} bytes", self.display());
         let len =
             self.session.write(self.write_buffer.make_contiguous()).or_else(|err| {
                 match err.kind() {
@@ -408,23 +410,23 @@ impl<S: NetSession> NetTransport<S> {
                     | io::ErrorKind::WriteZero
                     | io::ErrorKind::Interrupted => {
                         #[cfg(feature = "log")]
-                        log::warn!(target: "transport", "Resource {} kernel buffer is fulled (system message is '{err}')", self.display());
+                        log::warn!(target: NAME, "Resource {} kernel buffer is fulled (system message is '{err}')", self.display());
                         Ok(0)
                     },
                     _ => {
                         #[cfg(feature = "log")]
-                        log::error!(target: "transport", "Resource {} failed write operation with message '{err}'", self.display());
+                        log::error!(target: NAME, "Resource {} failed write operation with message '{err}'", self.display());
                         Err(err)
                     },
                 }
             })?;
         if orig_len > len {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.display());
+            log::debug!(target: NAME, "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = true;
         } else {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Resource {} was able to consume all of the buffered data ({len} of {orig_len} bytes)", self.display());
+            log::trace!(target: NAME, "Resource {} was able to consume all the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = false;
         }
         self.write_buffer.drain(..len);
@@ -450,18 +452,18 @@ impl<S: NetSession> Resource for NetTransport<S> {
         debug_assert_ne!(self.state, TransportState::Terminated, "I/O on terminated transport");
 
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Handling I/O on transport {self} with {io:?} intent while in {} state", self.state);
+        log::trace!(target: NAME, "Handling I/O on transport {self} with {io:?} intent while in {} state", self.state);
 
         let mut force_write_intent = false;
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Transport {self} is connected, initializing handshake");
+            log::debug!(target: NAME, "Transport {self} is connected, initializing handshake");
 
             force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
+            log::trace!(target: NAME, "Transport {self} got I/O while in handshake mode");
         }
 
         let resp = match io {
@@ -480,13 +482,13 @@ impl<S: NetSession> Resource for NetTransport<S> {
             && self.state != TransportState::Handshake
         {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Peer {self} has reset the connection");
+            log::debug!(target: NAME, "Peer {self} has reset the connection");
 
             self.state = TransportState::Terminated;
             resp
         } else if self.session.is_established() && self.state != TransportState::Active {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Handshake with {self} is complete");
+            log::debug!(target: NAME, "Handshake with {self} is complete");
 
             // We just got connected; may need to send output
             self.write_intent = true;

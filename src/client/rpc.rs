@@ -33,6 +33,8 @@ use std::marker::PhantomData;
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
 use crate::{Frame, ImpossibleResource, NetSession, NetTransport};
 
+const NAME: &str = "net-rpc";
+
 /// RPC callback type, which is a function closure taking single argument - sever reply message. The
 /// closure must be sendable between threads and is called in the context of the reactor thread.
 pub type RpcCb<Rep> = Box<dyn FnOnce(Rep) + Send>;
@@ -150,7 +152,7 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
     fn before_send(&mut self, data: Vec<u8>, cb: RpcCb<D::Reply>) -> Vec<u8> {
         let id = self.last_id;
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "sending RPC request to the server (RPC id={id})");
+        log::trace!(target: NAME, "sending RPC request to the server (RPC id={id})");
 
         let mut req = Vec::with_capacity(data.len() + 9);
         let check = self.callbacks.insert(id, cb);
@@ -167,21 +169,21 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
             match D::Reply::unmarshall(io::Cursor::new(msg.payload)) {
                 Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "received RPC reply for the request with RPC id={id}. Calling callback.");
+                    log::trace!(target: NAME, "received RPC reply for the request with RPC id={id}. Calling callback.");
 
                     cb(reply)
                 }
                 Ok(None) => unreachable!(),
                 Err(e) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
+                    log::error!(target: NAME, "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
 
                     self.delegate.on_msg_error(RpcReplyError::UnparsableReply(id, e.to_string()))
                 }
             }
         } else {
             #[cfg(feature = "log")]
-            log::error!(target: "netservices-client", "received RPC reply from the server with no matching callback (RPC id={id})");
+            log::error!(target: NAME, "received RPC reply from the server with no matching callback (RPC id={id})");
 
             self.delegate.on_msg_error(RpcReplyError::MismatchingReply(id, msg.payload));
         }
@@ -189,7 +191,7 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
 
     fn on_reply_unparsable(&mut self, err: ParseReplyError) {
         #[cfg(feature = "log")]
-        log::error!(target: "netservices-client", "received unparsable server message. Parse error: {err}");
+        log::error!(target: NAME, "received unparsable server message. Parse error: {err}");
 
         self.delegate.on_msg_error(RpcReplyError::UnparsableMsg(err))
     }

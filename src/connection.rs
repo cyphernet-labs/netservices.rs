@@ -29,6 +29,8 @@ use std::time::Duration;
 
 use cyphernet::addr::{Addr, InetHost, NetAddr};
 
+const NAME: &str = "connection";
+
 pub trait Address: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 impl<T> Address for T where T: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 
@@ -164,24 +166,24 @@ impl NetConnection for socket2::Socket {
         match socket2::Socket::connect(&socket, &addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", addr);
+                log::debug!(target: NAME, "Connected to {}", addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+                log::debug!(target: NAME, "Connecting to {} in a non-blocking way", addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                log::error!(target: NAME, "Can't connect to {}: address already in use", addr);
                 return Err(io::Error::from(io::ErrorKind::AlreadyExists));
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+                log::error!(target: NAME, "Can't connect to {} in a non-blocking way", addr);
             }
             Err(e) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                log::debug!(target: NAME, "Error connecting to {}: {}", addr, e);
                 return Err(e);
             }
         }
@@ -211,24 +213,24 @@ impl NetConnection for socket2::Socket {
         match socket2::Socket::connect(&socket, &remote_addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", remote_addr);
+                log::debug!(target: NAME, "Connected to {}", remote_addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", remote_addr);
+                log::debug!(target: NAME, "Connecting to {} in a non-blocking way", remote_addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", remote_addr);
+                log::error!(target: NAME, "Can't connect to {}: address already in use", remote_addr);
                 return Err(io::Error::from(io::ErrorKind::AlreadyExists));
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", remote_addr);
+                log::error!(target: NAME, "Can't connect to {} in a non-blocking way", remote_addr);
             }
             Err(e) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", remote_addr, e);
+                log::debug!(target: NAME, "Error connecting to {}: {}", remote_addr, e);
                 return Err(e);
             }
         }

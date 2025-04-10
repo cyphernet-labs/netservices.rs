@@ -29,7 +29,6 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt::{self, Debug, Formatter};
-use std::marker::PhantomData;
 use std::os::fd::RawFd;
 use std::time::Duration;
 use std::{io, mem};
@@ -42,15 +41,14 @@ use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, Sess
 #[cfg(feature = "log")]
 const NAME: &str = "net-client";
 
-/// The commands which are internally exchanged between [`Client`] runtime on the main thread and
-/// [`ClientService`] existing inside the reactor thread.
+/// The commands which are sent from [`Client`] runtime on the main thread and [`ClientDelegate`]
+/// from inside the reactor thread to [`ClientService`] existing in the reactor thread.
 ///
 /// When a user of the library calls [`Client`] method the actual command is passed to the
 /// [`ClientCommand`] using this array.
 ///
 /// Generic parameter `E` defines extra data used by more custom implementations of clients, like
 /// RPC, PubSub etc.
-#[doc(hidden)]
 pub enum ClientCommand<R: Frame, E: Send = ()> {
     /// Send raw data to the remote server. Second argument is an extension block which allows
     /// downstream implementations of specific client-server  to provide callbacks for RPC
@@ -93,7 +91,12 @@ pub enum OnDisconnect {
 
 /// Set of callbacks for managing client-server connections, provided by the [`Client`] user to the
 /// reactor.
-pub trait ConnectionDelegate<A, S: NetSession>: Send {
+pub trait ConnectionDelegate<A, S: NetSession>:
+    Send + Iterator<Item = ClientCommand<Self::Request, Self::Extra>>
+{
+    type Request: Frame + Debug;
+    type Extra: Send;
+
     /// Asks the delegate to construct a connection to the remote server and return it as a form of
     /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
     /// it.
@@ -114,14 +117,18 @@ pub trait ConnectionDelegate<A, S: NetSession>: Send {
 }
 
 /// Set of callbacks used by the client to notify the business logic about server messages.
-pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, S> {
+pub trait ClientDelegate<A, S: NetSession>: ConnectionDelegate<A, S> {
     /// The reply type which must be parsable from a byte blob.
     type Reply: Frame;
 
     /// Called before data are sent to the remote server. Provides a way for specific client-server
     /// message workflows to use extra data (like callbacks called on the server reply) and modify
     /// the message structure (adding request ids etc).
-    fn before_send(&mut self, data: Vec<u8>, #[allow(unused_variables)] extra: E) -> Vec<u8> {
+    fn before_send(
+        &mut self,
+        data: Vec<u8>,
+        #[allow(unused_variables)] extra: Self::Extra,
+    ) -> Vec<u8> {
         data
     }
 
@@ -147,7 +154,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, 
 ///   incoming messages (see also `delegate` above);
 /// - `E`: extension argument passed to the delegate, which can be used to provide callbacks for
 ///   server replies in RPC protocols and server published messages in PubSub protocols.
-struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send = ()> {
+struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S>> {
     /// Connection and messaging delegate providing callbacks for managing server connectivity and
     /// processing its messages.
     delegate: D,
@@ -171,12 +178,9 @@ struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Fram
     /// Buffer for the actions which has to be delivered to the reactor when it calls the
     /// [`ClientServer`] as an iterator.
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
-    _phantom: PhantomData<(R, E)>,
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send>
-    ClientService<A, S, D, R, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> ClientService<A, S, D> {
     /// Constructs new reactor handler providing delegate and remote server address. Will attempt to
     /// connect to the server automatically once the reactor thread has started.
     #[inline]
@@ -192,7 +196,6 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send>
             active: false,
             data_stack: empty!(),
             action_queue: VecDeque::from(vec![Action::SetTimer(Duration::from_millis(0))]),
-            _phantom: PhantomData,
         }
     }
 
@@ -248,12 +251,10 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send>
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame + Debug, E: Send> reactor::Handler
-    for ClientService<A, S, D, R, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> reactor::Handler for ClientService<A, S, D> {
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
-    type Command = ClientCommand<R, E>;
+    type Command = ClientCommand<D::Request, D::Extra>;
 
     fn tick(&mut self, time: Timestamp) {
         #[cfg(feature = "log")]
@@ -390,9 +391,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame + Debug, E: Se
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send> Iterator
-    for ClientService<A, S, D, R, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> Iterator for ClientService<A, S, D> {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> { self.action_queue.pop_front() }
@@ -402,24 +401,27 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send> Iter
 /// use of the server APIs.
 pub struct Client<Req: Frame, E: Send = ()> {
     reactor: Reactor<ClientCommand<Req, E>, popol::Poller>,
-    _phantom: PhantomData<Req>,
 }
 
-impl<Req: Frame, E> Client<Req, E>
+impl<R: Frame, E> Client<R, E>
 where
-    Req: Debug + 'static,
+    R: Debug + 'static,
     E: Send + 'static,
 {
     /// Constructs new client for client-server protocol. Takes service callback delegate and remote
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.
-    pub fn new<A: Send + 'static, S: NetSession + 'static, D: ClientDelegate<A, S, E> + 'static>(
+    pub fn new<
+        A: Send + 'static,
+        S: NetSession + 'static,
+        D: ClientDelegate<A, S, Request = R, Extra = E> + 'static,
+    >(
         delegate: D,
         remote: A,
     ) -> io::Result<Self> {
-        let service = ClientService::<A, S, D, Req, E>::new(delegate, remote);
+        let service = ClientService::<A, S, D>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
-        Ok(Self { reactor, _phantom: PhantomData })
+        Ok(Self { reactor })
     }
 
     /// Terminates the client, disconnecting from the server and stopping the reactor thread.
@@ -433,7 +435,7 @@ where
 
     pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.reactor.join() }
 
-    pub(super) fn send_extra(&self, req: Req, extra: E) -> io::Result<()> {
+    pub(super) fn send_extra(&self, req: R, extra: E) -> io::Result<()> {
         self.reactor
             .controller()
             .cmd(ClientCommand::Send(req, extra))

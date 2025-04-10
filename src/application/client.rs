@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2024 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2024 Cyphernet Labs, IDCS, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
-use std::fmt::{self, Debug, Formatter};
-use std::marker::PhantomData;
+use std::fmt::Debug;
 use std::os::fd::RawFd;
 use std::time::Duration;
 use std::{io, mem};
@@ -37,39 +36,23 @@ use std::{io, mem};
 use reactor::poller::popol;
 use reactor::{Action, Error, Reactor, ResourceId, ResourceType, Timestamp};
 
-use crate::{Direction, ImpossibleResource, NetSession, NetTransport, SessionEvent};
+use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
-/// The commands which are internally exchanged between [`Client`] runtime on the main thread and
-/// [`ClientService`] existing inside the reactor thread.
-///
-/// When a user of the library calls [`Client`] method the actual command is passed to the
-/// [`ClientCommand`] using this array.
-///
-/// Generic parameter `E` defines extra data used by more custom implementations of clients, like
-/// RPC, PubSub etc.
-#[doc(hidden)]
-pub enum ClientCommand<E: Send = ()> {
+#[cfg(feature = "log")]
+const NAME: &str = "net-client";
+
+/// The commands which are sent from [`Client`] runtime on the main thread and [`ClientDelegate`]
+/// from inside the reactor thread to [`ClientService`] existing in the reactor thread.
+#[derive(Debug)]
+pub enum ClientCommand<R: Frame> {
     /// Send raw data to the remote server. Second argument is an extension block which allows
     /// downstream implementations of specific client-server  to provide callbacks for RPC
     /// request-reply pairs.
-    Send(Vec<u8>, E),
+    Send(R),
 
     /// Close connection with the remote server, stop the reactor loop and complete the reactor
     /// thread.
     Terminate,
-}
-
-// Most of concrete types for generic `E` are not `Debug` (for instance, function closures); thus,
-// we have to provide a manual implementation.
-impl<E: Send> Debug for ClientCommand<E> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            ClientCommand::Send(data, _) => {
-                f.debug_tuple("ClientCommand::Send").field(data).field(&"<extra>").finish()
-            }
-            ClientCommand::Terminate => f.debug_tuple("ClientCommand::Terminate").finish(),
-        }
-    }
 }
 
 /// Enum defining the client behaviour when the connection with the server gets broken (or closed by
@@ -88,44 +71,41 @@ pub enum OnDisconnect {
 
 /// Set of callbacks for managing client-server connections, provided by the [`Client`] user to the
 /// reactor.
-pub trait ConnectionDelegate<A, S: NetSession>: Send {
+pub trait ConnectionDelegate<A, S: NetSession>:
+    Send + Iterator<Item = ClientCommand<Self::Request>>
+{
+    type Request: Frame + Debug;
+
     /// Asks the delegate to construct a connection to the remote server and return it as a form of
     /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
     /// it.
-    fn connect(&self, remote: &A) -> S;
+    fn connect(&mut self, remote: &A) -> S;
 
     /// Notifies about the successful establishment of the session with the server. The `attempt`
     /// argument specifies the number of the connection attempt which has succeeded, if a
     /// reconnection or failed connection had happened.
-    fn on_established(&self, artifact: S::Artifact, attempt: usize);
+    fn on_established(&mut self, artifact: S::Artifact, attempt: usize);
 
     /// Notifies about failed connection to the server. As a response, the client business logic can
     /// ask to re-establish connection by returning [`OnDisconnect::Reconnect`]. Otherwise, the
     /// reactor will terminate.
-    fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect;
+    fn on_disconnect(&mut self, err: io::Error, attempt: usize) -> OnDisconnect;
 
     /// Callback for processing reactor [`Error`]s.
-    fn on_io_error(&self, err: Error<ImpossibleResource, NetTransport<S>>);
+    fn on_io_error(&mut self, err: Error<ImpossibleResource, NetTransport<S>>);
 }
 
 /// Set of callbacks used by the client to notify the business logic about server messages.
-pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, S> {
+pub trait ClientDelegate<A, S: NetSession>: ConnectionDelegate<A, S> {
     /// The reply type which must be parsable from a byte blob.
-    type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
-
-    /// Called before data are sent to the remote server. Provides a way for specific client-server
-    /// message workflows to use extra data (like callbacks called on the server reply) and modify
-    /// the message structure (adding request ids etc).
-    fn before_send(&mut self, data: Vec<u8>, #[allow(unused_variables)] extra: E) -> Vec<u8> {
-        data
-    }
+    type Reply: Frame;
 
     /// Callback for processing the message received from the server.
     fn on_reply(&mut self, reply: Self::Reply);
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
-    fn on_reply_unparsable(&mut self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
+    fn on_reply_unparsable(&mut self, err: <Self::Reply as Frame>::Error);
 }
 
 /// Handler for the client-server connection reactor on the client side. Manages state of the server
@@ -142,7 +122,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, 
 ///   incoming messages (see also `delegate` above);
 /// - `E`: extension argument passed to the delegate, which can be used to provide callbacks for
 ///   server replies in RPC protocols and server published messages in PubSub protocols.
-struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send = ()> {
+struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S>> {
     /// Connection and messaging delegate providing callbacks for managing server connectivity and
     /// processing its messages.
     delegate: D,
@@ -166,16 +146,15 @@ struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send
     /// Buffer for the actions which has to be delivered to the reactor when it calls the
     /// [`ClientServer`] as an iterator.
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
-    _phantom: PhantomData<E>,
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<A, S, D, E> {
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> ClientService<A, S, D> {
     /// Constructs new reactor handler providing delegate and remote server address. Will attempt to
     /// connect to the server automatically once the reactor thread has started.
     #[inline]
     pub fn new(delegate: D, remote: A) -> Self {
         #[cfg(feature = "log")]
-        log::debug!(target: "netservices-client", "constructing client service object and scheduling connection timer");
+        log::debug!(target: NAME, "constructing client service object and scheduling connection timer");
         Self {
             delegate,
             remote,
@@ -185,7 +164,6 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
             active: false,
             data_stack: empty!(),
             action_queue: VecDeque::from(vec![Action::SetTimer(Duration::from_millis(0))]),
-            _phantom: PhantomData,
         }
     }
 
@@ -196,31 +174,32 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     fn connect(&mut self) {
         if self.active {
             #[cfg(feature = "log")]
-            log::error!(target: "netservices-client", "calling connect method while the server connection exists (or has been establishing)");
+            log::error!(target: NAME, "calling connect method while the server connection exists (or has been establishing)");
             return;
         }
         self.active = true;
         loop {
             #[cfg(feature = "log")]
-            log::info!(target: "netservices-client", "attempting to connect the server for the {} time", self.attempts + 1);
+            log::info!(target: NAME, "attempting to connect the server for the {} time", self.attempts + 1);
 
             let session = self.delegate.connect(&self.remote);
             match NetTransport::with_session(session, Direction::Outbound) {
                 Ok(transport) => {
                     #[cfg(feature = "log")]
-                    log::info!(target: "netservices-client", "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
+                    log::info!(target: NAME, "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
 
-                    self.action_queue.push_back(Action::RegisterTransport(transport));
+                    self.action_queue
+                        .push_back(Action::RegisterTransport(transport));
                     break;
                 }
                 Err(err) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "error connecting to the server: {err}");
+                    log::error!(target: NAME, "error connecting to the server: {err}");
 
                     self.attempts += 1;
                     if self.delegate.on_disconnect(err, self.attempts) == OnDisconnect::Terminate {
                         #[cfg(feature = "log")]
-                        log::debug!(target: "netservices-client", "delegate signalled to terminate the reactor due to unsuccesful server connection");
+                        log::debug!(target: NAME, "delegate signalled to terminate the reactor due to unsuccesful server connection");
 
                         self.terminate();
                         break;
@@ -234,58 +213,66 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     /// will receive it and close the connection to the server.
     fn terminate(&mut self) {
         #[cfg(feature = "log")]
-        log::info!(target: "netservices-client", "Scheduling to terminate the reactor and client service");
+        log::info!(target: NAME, "Scheduling to terminate the reactor and client service");
 
         self.action_queue.push_back(Action::Terminate);
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handler
-    for ClientService<A, S, D, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> reactor::Handler for ClientService<A, S, D> {
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
-    type Command = ClientCommand<E>;
+    type Command = ClientCommand<D::Request>;
 
     fn tick(&mut self, time: Timestamp) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "reactor tick at {time}");
+        log::trace!(target: NAME, "reactor tick at {time}");
     }
 
     fn handle_timer(&mut self) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "reactor timer event");
+        log::trace!(target: NAME, "reactor timer event");
         if !self.active {
             #[cfg(feature = "log")]
-            log::debug!(target: "netservices-client", "attempting to connect to the remote server on the timer event");
+            log::debug!(target: NAME, "attempting to connect to the remote server on the timer event");
             self.connect();
         }
     }
 
-    fn handle_listener_event(&mut self, _: ResourceId, _: (), _: Timestamp) {
+    fn handle_listener_event(&mut self, _: RawFd, _: ResourceId, _: (), _: Timestamp) {
         unreachable!("there is no listener in client")
     }
 
-    fn handle_transport_event(&mut self, id: ResourceId, event: SessionEvent<S>, time: Timestamp) {
+    fn handle_transport_event(
+        &mut self,
+        fd: RawFd,
+        id: ResourceId,
+        event: SessionEvent<S>,
+        time: Timestamp,
+    ) {
         debug_assert_eq!(self.connection_id, Some(id));
         match event {
-            SessionEvent::Established(fd, artifact) => {
+            SessionEvent::Established(artifact) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices-client", "established connection to server (fd={fd}, time={time}), notifying delegate");
+                log::debug!(target: NAME, "established connection to server (fd={fd}, time={time}), notifying delegate");
 
-                self.connection_fd = Some(fd);
+                debug_assert_eq!(self.connection_fd, Some(fd));
                 self.delegate.on_established(artifact, self.attempts);
             }
-            SessionEvent::Data(data) => match D::Reply::try_from(data) {
-                Ok(reply) => {
+            SessionEvent::Data(data) => match D::Reply::unmarshall(io::Cursor::new(data)) {
+                Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "received reply from the server at {time}");
+                    log::trace!(target: NAME, "received reply from the server at {time}");
 
                     self.delegate.on_reply(reply)
                 }
+                Ok(None) => {
+                    #[cfg(feature = "log")]
+                    log::trace!(target: NAME, "received partial reply data from the server at {time}");
+                }
                 Err(err) => {
                     #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "unparsable reply from the server at {time}: {}", err);
+                    log::error!(target: NAME, "unparsable reply from the server at {time}: {}", err);
 
                     self.delegate.on_reply_unparsable(err)
                 }
@@ -297,7 +284,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
                 self.attempts += 1;
 
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices-client", "disconnected from the server for the {} time", self.attempts);
+                log::debug!(target: NAME, "disconnected from the server for the {} time", self.attempts);
 
                 if self.delegate.on_disconnect(err, self.attempts) == OnDisconnect::Reconnect {
                     self.connect();
@@ -310,33 +297,36 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
+        log::trace!(target: NAME, "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
         debug_assert_eq!(ty, ResourceType::Transport);
-        debug_assert_eq!(self.connection_fd, Some(fd));
 
+        self.connection_fd = Some(fd);
         self.connection_id = Some(id);
 
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "scheduling sending {} buffered messages to the server", self.data_stack.len());
+        log::trace!(target: NAME, "scheduling sending {} buffered messages to the server", self.data_stack.len());
         let mut data_stack = vec![];
         mem::swap(&mut data_stack, &mut self.data_stack);
-        self.action_queue.extend(data_stack.into_iter().map(|data| Action::Send(id, data)));
+        self.action_queue
+            .extend(data_stack.into_iter().map(|data| Action::Send(id, data)));
     }
 
     fn handle_command(&mut self, cmd: Self::Command) {
         match cmd {
-            ClientCommand::Send(data, extra) => {
-                #[cfg(feature = "log")]
-                log::trace!(target: "netservices-client", "sending data to the server ({} bytes)", data.len());
+            ClientCommand::Send(data) => {
+                let mut buf = Vec::new();
+                data.marshall(&mut buf).expect("failed to marshall request");
 
-                let data = self.delegate.before_send(data, extra);
+                #[cfg(feature = "log")]
+                log::trace!(target: NAME, "sending data to the server ({} bytes)", buf.len());
+
                 if let Some(id) = self.connection_id {
-                    self.action_queue.push_back(Action::Send(id, data));
+                    self.action_queue.push_back(Action::Send(id, buf));
                 } else {
                     #[cfg(feature = "log")]
-                    log::trace!(target: "netservices-client", "buffering the data since the connection is not yet established ({} elements in the stack already)", self.data_stack.len());
+                    log::trace!(target: NAME, "buffering the data since the connection is not yet established ({} elements in the stack already)", self.data_stack.len());
 
-                    self.data_stack.push(data);
+                    self.data_stack.push(buf);
                 }
             }
             ClientCommand::Terminate => {
@@ -347,7 +337,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
         #[cfg(feature = "log")]
-        log::error!(target: "netservices-client", "I/O error in server connection: {err}");
+        log::error!(target: NAME, "I/O error in server connection: {err}");
 
         self.delegate.on_io_error(err)
     }
@@ -358,7 +348,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
     fn handover_transport(&mut self, id: ResourceId, transport: Self::Transport) {
         #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "transport {} has been disconnected and handed over (id={id})", transport.display());
+        log::trace!(target: NAME, "transport {} has been disconnected and handed over (id={id})", transport.display());
         debug_assert!(self.connection_fd.is_some());
         debug_assert_eq!(self.connection_id, Some(id));
 
@@ -368,9 +358,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
-    for ClientService<A, S, D, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> Iterator for ClientService<A, S, D> {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> { self.action_queue.pop_front() }
@@ -378,27 +366,25 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct Client<Req: Into<Vec<u8>>, E: Send = ()> {
-    reactor: Reactor<ClientCommand<E>, popol::Poller>,
-    _phantom: PhantomData<Req>,
+pub struct Client<R: Frame> {
+    reactor: Reactor<ClientCommand<R>, popol::Poller>,
 }
 
-impl<Req: Into<Vec<u8>>, E> Client<Req, E>
-where E: Send + 'static
-{
+impl<R: Frame + Debug + 'static> Client<R> {
     /// Constructs new client for client-server protocol. Takes service callback delegate and remote
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.
-    pub fn new<A: Send + 'static, S: NetSession + 'static, D: ClientDelegate<A, S, E> + 'static>(
+    pub fn new<
+        A: Send + 'static,
+        S: NetSession + 'static,
+        D: ClientDelegate<A, S, Request = R> + 'static,
+    >(
         delegate: D,
         remote: A,
     ) -> io::Result<Self> {
-        let service = ClientService::<A, S, D, E>::new(delegate, remote);
+        let service = ClientService::<A, S, D>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
-        Ok(Self {
-            reactor,
-            _phantom: PhantomData,
-        })
+        Ok(Self { reactor })
     }
 
     /// Terminates the client, disconnecting from the server and stopping the reactor thread.
@@ -407,16 +393,12 @@ where E: Send + 'static
             .controller()
             .cmd(ClientCommand::Terminate)
             .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
-        self.reactor.join()?;
-        Ok(())
+        self.join()
     }
 
-    pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
-        self.reactor.controller().cmd(ClientCommand::Send(data.into(), extra))
-    }
-}
+    pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.reactor.join() }
 
-impl<Req: Into<Vec<u8>>> Client<Req> {
-    /// Sends a new request to the server.
-    pub fn send(&self, req: Req) -> io::Result<()> { self.send_extra(req, ()) }
+    pub fn send(&self, req: R) -> io::Result<()> {
+        self.reactor.controller().cmd(ClientCommand::Send(req))
+    }
 }

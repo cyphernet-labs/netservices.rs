@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2024 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2024 Cyphernet Labs, IDCS, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod node;
-mod remotes;
+pub mod frame;
 
-pub use node::{Metrics, Node, NodeController, NodeCtl};
-pub use remotes::{DisconnectReason, Inbound, Outbound, Remote, Remotes};
+mod connection;
+mod listener;
+mod split;
+
+#[cfg(feature = "reactor")]
+mod resource;
+#[cfg(feature = "reactor")]
+pub mod remotes;
+
+pub use connection::{Address, AsConnection, NetConnection, NetStream};
+pub use frame::{Frame, Marshaller};
+pub use listener::NetListener;
+#[cfg(feature = "reactor")]
+pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
+pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};

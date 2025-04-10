@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2024 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2024 Cyphernet Labs, IDCS, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ use cyphernet::encrypt::noise::NoiseState;
 use cyphernet::encrypt::noise::{HandshakePattern, Keyset};
 use cyphernet::proxy::socks5;
 #[cfg(feature = "eidolon")]
-use cyphernet::{x25519, Cert, Digest, EcSign};
+use cyphernet::{Cert, Digest, EcSign, x25519};
 
 #[cfg(feature = "eidolon")]
 use crate::Direction;
@@ -315,12 +315,7 @@ where S::Artifact: IntoInit<M::Init>
         Self::with(session, M::default())
     }
 
-    pub fn with(session: S, state_machine: M) -> Self {
-        Self {
-            state: state_machine,
-            session,
-        }
-    }
+    pub fn with(session: S, state_machine: M) -> Self { Self { state: state_machine, session } }
 
     fn init(&mut self) -> bool {
         if !self.state.is_init() {
@@ -430,11 +425,7 @@ where S::Artifact: IntoInit<M::Init>
             }
         }
 
-        if buf.is_empty() {
-            Ok(0)
-        } else {
-            Err(io::ErrorKind::Interrupted.into())
-        }
+        if buf.is_empty() { Ok(0) } else { Err(io::ErrorKind::Interrupted.into()) }
     }
 
     fn flush(&mut self) -> io::Result<()> { self.session.flush() }
@@ -455,10 +446,7 @@ where S::Artifact: IntoInit<M::Init>
         match self.session.split_io() {
             Err(err) => {
                 self.session = err.original;
-                Err(SplitIoError {
-                    original: self,
-                    error: err.error,
-                })
+                Err(SplitIoError { original: self, error: err.error })
             }
             Ok((reader, writer)) => Ok((NetReader { unique_id, reader }, NetWriter {
                 unique_id,
@@ -582,17 +570,11 @@ mod imp_eidolon {
 
     impl<S: EcSign> EidolonRuntime<S> {
         pub fn initiator(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
-            Self {
-                state: EidolonState::initiator(cert, allowed_ids),
-                signer,
-            }
+            Self { state: EidolonState::initiator(cert, allowed_ids), signer }
         }
 
         pub fn responder(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
-            Self {
-                state: EidolonState::responder(cert, allowed_ids),
-                signer,
-            }
+            Self { state: EidolonState::responder(cert, allowed_ids), signer }
         }
     }
 
@@ -642,8 +624,8 @@ mod imp_eidolon {
 pub use imp_eidolon::EidolonRuntime;
 
 mod impl_noise {
-    use cyphernet::encrypt::noise::error::NoiseError;
     use cyphernet::encrypt::noise::NoiseState;
+    use cyphernet::encrypt::noise::error::NoiseError;
     use cyphernet::{Digest, EcPk, Ecdh};
 
     use super::*;
@@ -664,10 +646,7 @@ mod impl_noise {
 
     impl<E: Ecdh, D: Digest> NoiseArtifact<E, D> {
         pub fn with(handshake_hash: D::Output, remote_static_key: Option<E::Pk>) -> Self {
-            NoiseArtifact {
-                handshake_hash,
-                remote_static_key,
-            }
+            NoiseArtifact { handshake_hash, remote_static_key }
         }
 
         pub fn to_vec(&self) -> Vec<u8> {

@@ -1,37 +1,37 @@
 [package]
 name = "netservices"
-description = "Library for building scalable privacy-preserving microservices P2P nodes"
-version = "0.8.1"
+description = "Library for building scalable privacy-preserving networking apps and P2P nodes"
+version = "0.12.0-beta.1"
 authors = ["Dr. Maxim Orlovsky <orlovsky@cyphernet.org>"]
-keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
+keywords = ["privacy", "cypherpunk", "tor", "p2p", "reactor"]
 categories = ["network-programming", "cryptography", "concurrency"]
 homepage = "https://cyphernet.org"
-repository = "https://github.com/Cyphernet-DAO/rust-netservices"
-rust-version = "1.69"
-edition = "2021"
+repository = "https://github.com/Cyphernet-Labs/netservices.rs"
+rust-version = "1.85.0"
+edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-amplify = "4.7.0"
-io-reactor = { version = "0.5.2", optional = true }
+amplify = "4.8.0"
+io-reactor = { version = "0.6.0", optional = true }
 cyphernet = { version = "0.5.2", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets", "dns"] }
-mio = { version = "1.0.0", optional = true }
 socket2 = { version = "0.5.7", optional = true, features = ["all"] }
-libc = "0.2.154"
-log_crate = { package = "log", version = "0.4.17", optional = true }
-rand = "0.8.5" # Used in SplitIo shared secret
+libc = { version = "0.2.154", optional = true }
+log = { version = "0.4.17", optional = true }
+rand = "0.9.0" # Used in SplitIo shared secret
 
 [dev-dependencies]
-log_crate = { package = "log", version = "0.4.17" }
+log = { version = "0.4.17" }
 
 [features]
 default = ["reactor", "socket2"]
-all = ["reactor", "nonblocking", "eidolon", "mio", "log"]
+all = ["reactor", "nonblocking", "eidolon", "log"]
 eidolon = ["cyphernet/eidolon", "cyphernet/x25519"]
-reactor = ["io-reactor", "nonblocking"]
-nonblocking = ["socket2"]
-log = ["log_crate", "io-reactor/log"]
+reactor = ["dep:io-reactor", "nonblocking"]
+socket2 = ["dep:socket2", "nonblocking"]
+nonblocking = ["socket2", "dep:libc"]
+log = ["dep:log", "io-reactor/log"]
 
 [package.metadata.docs.rs]
 all-features = false
@@ -39,6 +39,6 @@ features = []
 rustc-args = ["--cfg", "docsrs"]
 
 [patch.crates-io]
-io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "terminate" }
+io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "v0.6" }
 cyphergraphy = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }
 cypheraddr = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }

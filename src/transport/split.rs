@@ -22,7 +22,7 @@
 use std::io;
 use std::net::TcpStream;
 
-use crate::connection::AsConnection;
+use crate::transport::AsConnection;
 use crate::{NetConnection, NetSession, NetStateMachine};
 
 #[derive(Debug, Display)]

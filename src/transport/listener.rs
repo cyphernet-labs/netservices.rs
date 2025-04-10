@@ -23,7 +23,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 
-use crate::connection::NetConnection;
+use crate::transport::NetConnection;
 
 pub trait NetListener: AsRawFd + Send {
     type Stream: NetConnection;

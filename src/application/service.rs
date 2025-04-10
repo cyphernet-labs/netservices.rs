@@ -41,6 +41,20 @@ use crate::{
 };
 
 const NAME: &str = "net-service";
+/// The commands which are sent from service [`Runtime`] on the main thread and
+/// [`ServiceController`] from inside the reactor thread to [`Service`] existing in the reactor
+/// thread.
+#[derive(Debug)]
+pub enum ServiceCommand<Id, R: Frame> {
+    /// Send raw data to the remote server. Second argument is an extension block which allows
+    /// downstream implementations of specific client-server  to provide callbacks for RPC
+    /// request-reply pairs.
+    Send(Id, R),
+
+    /// Close connection with the remote server, stop the reactor loop and complete the reactor
+    /// thread.
+    Terminate,
+}
 
 // TODO: Do a proper metrics measurements
 // TODO: Consider collecting metrics using Marshaller; move (dis)connection counting to business
@@ -62,10 +76,14 @@ pub trait ServiceController<
     S: NetSession,
     L: NetListener<Stream = S::Connection>,
     Cmd,
->: Send + Iterator<Item = Action<NetAccept<S, L>, NetTransport<S>>>
+>:
+    Send + Iterator<Item = ServiceCommand<<S::Artifact as Artifact>::NodeId, Self::OutFrame>>
 {
-    /// Framing for incoming messages
+    /// Framing for incoming messages.
     type InFrame: Frame;
+
+    /// Framing for outgoing messages.
+    type OutFrame: Frame;
 
     fn should_accept(&mut self, remote: &A, time: Timestamp) -> bool;
 
@@ -115,7 +133,6 @@ pub trait ServiceController<
 
     fn on_timer(&mut self) {}
 
-    // TODO: Pass full remote information, including address and node id.
     fn on_frame(&mut self, remote_id: <S::Artifact as Artifact>::NodeId, req: Self::InFrame);
 
     /// Called on failure of frame parsing, before disconnecting the remote and calling
@@ -558,15 +575,15 @@ impl<
                 log::error!(target: NAME, "Can't poll connections: {err}");
             }
             #[allow(unused_variables)]
-            Error::ListenerDisconnect(id, _) => {
+            Error::ListenerDisconnect(res_id, _) => {
                 // TODO: This should be a fatal error, there's nothing we can do here.
                 #[cfg(feature = "log")]
-                log::error!(target: NAME, "Listener {id} disconnected");
+                log::error!(target: NAME, "Listener {res_id} disconnected");
             }
-            Error::TransportDisconnect(id, transport) => {
+            Error::TransportDisconnect(res_id, transport) => {
                 let fd = transport.as_raw_fd();
                 #[cfg(feature = "log")]
-                log::error!(target: NAME, "Remote id={id} (fd={fd}) disconnected");
+                log::error!(target: NAME, "Remote id={res_id} (fd={fd}) disconnected");
 
                 // We're dropping the transport (and underlying network connection) here.
                 drop(transport);
@@ -574,7 +591,7 @@ impl<
                 // The remote transport is already disconnected and removed from the reactor;
                 // therefore there is no need to initiate a disconnection. We simply remove
                 // the remote from the map.
-                match self.remotes.remove(&id) {
+                match self.remotes.remove(&res_id) {
                     Some(remote) => {
                         if let Some(id) = remote.remote_id() {
                             self.controller.on_disconnected(
@@ -587,7 +604,7 @@ impl<
                             log::debug!(target: NAME, "Inbound disconnection before handshake; ignoring")
                         }
                     }
-                    None => self.cleanup(id, fd),
+                    None => self.cleanup(res_id, fd),
                 }
             }
         }
@@ -652,7 +669,17 @@ impl<
     type Item = Action<NetAccept<S, L>, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.actions.extend(&mut self.controller);
+        self.actions
+            .extend(self.controller.by_ref().map(|command| match command {
+                ServiceCommand::Send(node_id, msg) => {
+                    let mut data = Vec::new();
+                    // in-memory marshalling must not fail
+                    let _ = msg.marshall(&mut data);
+                    let (res_id, _) = self.remotes.lookup(&node_id).expect("remote must exist");
+                    Action::Send(res_id, data)
+                }
+                ServiceCommand::Terminate => Action::Terminate,
+            }));
         self.actions.pop_front()
     }
 }

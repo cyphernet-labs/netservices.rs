@@ -43,9 +43,6 @@ const NAME: &str = "net-client";
 
 /// The commands which are sent from [`Client`] runtime on the main thread and [`ClientDelegate`]
 /// from inside the reactor thread to [`ClientService`] existing in the reactor thread.
-///
-/// When a user of the library calls [`Client`] method the actual command is passed to the
-/// [`ClientCommand`] using this array.
 #[derive(Debug)]
 pub enum ClientCommand<R: Frame> {
     /// Send raw data to the remote server. Second argument is an extension block which allows

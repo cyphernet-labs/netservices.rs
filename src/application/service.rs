@@ -279,7 +279,7 @@ impl<
                 };
                 let fd = connection.as_raw_fd();
                 #[cfg(feature = "log")]
-                log::debug!(target: NAME, "Inbound connection from {remote} (fd={fd})");
+                log::debug!(target: NAME, "Inbound connection from {remote} (fd={fd}) on listener {res_id} (fd={listener_fd})");
 
                 // If the service doesn't want to accept this connection,
                 // we drop the connection here, which disconnects the socket.
@@ -327,7 +327,7 @@ impl<
                     .expect("listener must exist");
                 let addr = listener.to_socket_addr();
                 #[cfg(feature = "log")]
-                log::error!(target: NAME, "Error accepting an inbound connection on {addr} (fd={listener_fd}): {err}");
+                log::error!(target: NAME, "Error accepting an inbound connection on listener {addr} (fd={listener_fd}): {err}");
                 self.controller.on_accept_failure(addr, err, time);
             }
         }

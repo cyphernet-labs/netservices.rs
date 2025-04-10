@@ -82,20 +82,20 @@ pub trait ConnectionDelegate<A, S: NetSession>:
     /// Asks the delegate to construct a connection to the remote server and return it as a form of
     /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
     /// it.
-    fn connect(&self, remote: &A) -> S;
+    fn connect(&mut self, remote: &A) -> S;
 
     /// Notifies about the successful establishment of the session with the server. The `attempt`
     /// argument specifies the number of the connection attempt which has succeeded, if a
     /// reconnection or failed connection had happened.
-    fn on_established(&self, artifact: S::Artifact, attempt: usize);
+    fn on_established(&mut self, artifact: S::Artifact, attempt: usize);
 
     /// Notifies about failed connection to the server. As a response, the client business logic can
     /// ask to re-establish connection by returning [`OnDisconnect::Reconnect`]. Otherwise, the
     /// reactor will terminate.
-    fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect;
+    fn on_disconnect(&mut self, err: io::Error, attempt: usize) -> OnDisconnect;
 
     /// Callback for processing reactor [`Error`]s.
-    fn on_io_error(&self, err: Error<ImpossibleResource, NetTransport<S>>);
+    fn on_io_error(&mut self, err: Error<ImpossibleResource, NetTransport<S>>);
 }
 
 /// Set of callbacks used by the client to notify the business logic about server messages.

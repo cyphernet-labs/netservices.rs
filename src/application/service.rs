@@ -673,19 +673,27 @@ impl<
 
     fn next(&mut self) -> Option<Self::Item> {
         self.actions
-            .extend(self.controller.by_ref().map(|command| match command {
+            .extend(self.controller.by_ref().filter_map(|command| match command {
                 ServiceCommand::Send(node_id, msg) => {
                     let mut data = Vec::new();
                     // in-memory marshalling must not fail
                     let _ = msg.marshall(&mut data);
-                    let (res_id, _) = self.remotes.lookup(&node_id).expect("remote must exist");
-                    Action::Send(res_id, data)
+                    let Some((res_id, _)) = self.remotes.lookup(&node_id) else {
+                        #[cfg(feature = "log")]
+                        log::error!(target: NAME, "Command to send data to non-existent remote with id={node_id}");
+                        return None;
+                    };
+                    Some(Action::Send(res_id, data))
                 }
                 ServiceCommand::Disconnect(node_id) => {
-                    let (res_id, _) = self.remotes.lookup(&node_id).expect("remote must exist");
-                    Action::UnregisterTransport(res_id)
+                    let Some((res_id, _)) = self.remotes.lookup(&node_id) else {
+                        #[cfg(feature = "log")]
+                        log::error!(target: NAME, "Command from the controller to disconnecting non-existent remote with id={node_id}");
+                        return None;
+                    };
+                    Some(Action::UnregisterTransport(res_id))
                 }
-                ServiceCommand::Terminate => Action::Terminate,
+                ServiceCommand::Terminate => Some(Action::Terminate),
             }));
         self.actions.pop_front()
     }

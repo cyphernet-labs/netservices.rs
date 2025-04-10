@@ -100,9 +100,6 @@ pub trait RpcDelegate<A: Send, S: NetSession>: ConnectionDelegate<A, S> {
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`RpcReply`] type.
     fn on_msg_error(&self, err: impl std::error::Error);
-
-    /// Callback for processing the message received from the server.
-    fn on_reply(&mut self, reply: Self::Reply);
 }
 
 /// Service handing RPC and Pub message processing.
@@ -178,14 +175,16 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
                     #[cfg(feature = "log")]
                     log::error!(target: NAME, "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
 
-                    self.delegate.on_msg_error(RpcReplyError::UnparsableReply(id, e.to_string()))
+                    self.delegate
+                        .on_msg_error(RpcReplyError::UnparsableReply(id, e.to_string()))
                 }
             }
         } else {
             #[cfg(feature = "log")]
             log::error!(target: NAME, "received RPC reply from the server with no matching callback (RPC id={id})");
 
-            self.delegate.on_msg_error(RpcReplyError::MismatchingReply(id, msg.payload));
+            self.delegate
+                .on_msg_error(RpcReplyError::MismatchingReply(id, msg.payload));
         }
     }
 
@@ -193,7 +192,8 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
         #[cfg(feature = "log")]
         log::error!(target: NAME, "received unparsable server message. Parse error: {err}");
 
-        self.delegate.on_msg_error(RpcReplyError::UnparsableMsg(err))
+        self.delegate
+            .on_msg_error(RpcReplyError::UnparsableMsg(err))
     }
 }
 

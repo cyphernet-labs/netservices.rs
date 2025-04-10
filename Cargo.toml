@@ -29,7 +29,7 @@ default = ["reactor", "socket2"]
 all = ["reactor", "nonblocking", "eidolon", "log"]
 eidolon = ["cyphernet/eidolon", "cyphernet/x25519"]
 reactor = ["dep:io-reactor", "nonblocking"]
-socket2 = ["dep:socket2"]
+socket2 = ["dep:socket2", "nonblocking"]
 nonblocking = ["socket2", "dep:libc"]
 log = ["dep:log", "io-reactor/log"]
 

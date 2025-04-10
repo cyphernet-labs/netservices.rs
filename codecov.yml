@@ -1,6 +1,0 @@
-codecov:
-  require_ci_to_pass: no
-
-coverage:
-  precision: 1
-  round: nearest

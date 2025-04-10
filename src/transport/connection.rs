@@ -23,12 +23,14 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+#[cfg(feature = "nonblocking")]
 use std::os::fd::IntoRawFd;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 use cyphernet::addr::{Addr, InetHost, NetAddr};
 
+#[allow(dead_code)]
 const NAME: &str = "connection";
 
 pub trait Address: Addr + Send + Clone + Eq + Hash + Debug + Display {}
@@ -196,6 +198,7 @@ impl NetConnection for socket2::Socket {
         Ok(socket)
     }
 
+    #[cfg(feature = "nonblocking")]
     fn connect_reusable_nonblocking(
         local_addr: Self::Addr,
         remote_addr: Self::Addr,

@@ -40,9 +40,9 @@ pub mod service;
 #[cfg(feature = "reactor")]
 pub mod client;
 #[cfg(feature = "reactor")]
-pub mod server;
-#[cfg(feature = "reactor")]
 pub mod node;
+#[cfg(feature = "reactor")]
+pub mod tunnel;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -52,8 +52,6 @@ pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 #[cfg(feature = "reactor")]
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
-#[cfg(feature = "reactor")]
-pub use server::tunnel;
 pub use session::{Artifact, NetProtocol, NetSession, NetStateMachine, NodeId};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 

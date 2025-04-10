@@ -728,6 +728,12 @@ impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {
         Ok(Self { reactor })
     }
 
+    pub fn cmd(&mut self, cmd: Cmd) -> io::Result<()> { self.reactor.controller().cmd(cmd) }
+
+    pub fn sender(&self) -> reactor::Controller<Cmd, popol::PopolWaker> {
+        self.reactor.controller().clone()
+    }
+
     /// Joins the reactor thread.
     pub fn join(self) -> thread::Result<()> { self.reactor.join() }
 

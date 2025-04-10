@@ -51,6 +51,9 @@ pub enum ServiceCommand<Id, R: Frame> {
     /// request-reply pairs.
     Send(Id, R),
 
+    /// Disconnect remote.
+    Disconnect(Id),
+
     /// Close connection with the remote server, stop the reactor loop and complete the reactor
     /// thread.
     Terminate,
@@ -677,6 +680,10 @@ impl<
                     let _ = msg.marshall(&mut data);
                     let (res_id, _) = self.remotes.lookup(&node_id).expect("remote must exist");
                     Action::Send(res_id, data)
+                }
+                ServiceCommand::Disconnect(node_id) => {
+                    let (res_id, _) = self.remotes.lookup(&node_id).expect("remote must exist");
+                    Action::UnregisterTransport(res_id)
                 }
                 ServiceCommand::Terminate => Action::Terminate,
             }));

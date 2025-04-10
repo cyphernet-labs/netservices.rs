@@ -1,9 +1,9 @@
 [package]
 name = "netservices"
-description = "Library for building scalable privacy-preserving microservices P2P nodes"
-version = "0.11.0"
+description = "Library for building scalable privacy-preserving networking apps and P2P nodes"
+version = "0.12.0-beta.1"
 authors = ["Dr. Maxim Orlovsky <orlovsky@cyphernet.org>"]
-keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
+keywords = ["privacy", "cypherpunk", "tor", "p2p", "reactor"]
 categories = ["network-programming", "cryptography", "concurrency"]
 homepage = "https://cyphernet.org"
 repository = "https://github.com/Cyphernet-Labs/netservices.rs"

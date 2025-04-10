@@ -39,6 +39,7 @@ use reactor::{Action, Error, Reactor, ResourceId, ResourceType, Timestamp};
 
 use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
+#[cfg(feature = "log")]
 const NAME: &str = "net-client";
 
 /// The commands which are internally exchanged between [`Client`] runtime on the main thread and
@@ -50,11 +51,11 @@ const NAME: &str = "net-client";
 /// Generic parameter `E` defines extra data used by more custom implementations of clients, like
 /// RPC, PubSub etc.
 #[doc(hidden)]
-pub enum ClientCommand<E: Send = ()> {
+pub enum ClientCommand<R: Frame, E: Send = ()> {
     /// Send raw data to the remote server. Second argument is an extension block which allows
     /// downstream implementations of specific client-server  to provide callbacks for RPC
     /// request-reply pairs.
-    Send(Vec<u8>, E),
+    Send(R, E),
 
     /// Close connection with the remote server, stop the reactor loop and complete the reactor
     /// thread.
@@ -63,7 +64,7 @@ pub enum ClientCommand<E: Send = ()> {
 
 // Most of the concrete types for generic `E` are not `Debug` (for instance, function closures);
 // thus, we have to provide a manual implementation.
-impl<E: Send> Debug for ClientCommand<E> {
+impl<R: Frame + Debug, E: Send> Debug for ClientCommand<R, E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ClientCommand::Send(data, _) => f
@@ -146,7 +147,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, 
 ///   incoming messages (see also `delegate` above);
 /// - `E`: extension argument passed to the delegate, which can be used to provide callbacks for
 ///   server replies in RPC protocols and server published messages in PubSub protocols.
-struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send = ()> {
+struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send = ()> {
     /// Connection and messaging delegate providing callbacks for managing server connectivity and
     /// processing its messages.
     delegate: D,
@@ -170,10 +171,12 @@ struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send
     /// Buffer for the actions which has to be delivered to the reactor when it calls the
     /// [`ClientServer`] as an iterator.
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
-    _phantom: PhantomData<E>,
+    _phantom: PhantomData<(R, E)>,
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<A, S, D, E> {
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send>
+    ClientService<A, S, D, R, E>
+{
     /// Constructs new reactor handler providing delegate and remote server address. Will attempt to
     /// connect to the server automatically once the reactor thread has started.
     #[inline]
@@ -245,12 +248,12 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handler
-    for ClientService<A, S, D, E>
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame + Debug, E: Send> reactor::Handler
+    for ClientService<A, S, D, R, E>
 {
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
-    type Command = ClientCommand<E>;
+    type Command = ClientCommand<R, E>;
 
     fn tick(&mut self, time: Timestamp) {
         #[cfg(feature = "log")]
@@ -342,10 +345,13 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
     fn handle_command(&mut self, cmd: Self::Command) {
         match cmd {
             ClientCommand::Send(data, extra) => {
-                #[cfg(feature = "log")]
-                log::trace!(target: NAME, "sending data to the server ({} bytes)", data.len());
+                let mut buf = Vec::new();
+                data.marshall(&mut buf).expect("failed to marshall request");
 
-                let data = self.delegate.before_send(data, extra);
+                #[cfg(feature = "log")]
+                log::trace!(target: NAME, "sending data to the server ({} bytes)", buf.len());
+
+                let data = self.delegate.before_send(buf, extra);
                 if let Some(id) = self.connection_id {
                     self.action_queue.push_back(Action::Send(id, data));
                 } else {
@@ -384,8 +390,8 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
-    for ClientService<A, S, D, E>
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, R: Frame, E: Send> Iterator
+    for ClientService<A, S, D, R, E>
 {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
@@ -395,12 +401,14 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
 pub struct Client<Req: Frame, E: Send = ()> {
-    reactor: Reactor<ClientCommand<E>, popol::Poller>,
+    reactor: Reactor<ClientCommand<Req, E>, popol::Poller>,
     _phantom: PhantomData<Req>,
 }
 
 impl<Req: Frame, E> Client<Req, E>
-where E: Send + 'static
+where
+    Req: Debug + 'static,
+    E: Send + 'static,
 {
     /// Constructs new client for client-server protocol. Takes service callback delegate and remote
     /// server address. Will attempt to connect to the server automatically once the reactor thread
@@ -409,7 +417,7 @@ where E: Send + 'static
         delegate: D,
         remote: A,
     ) -> io::Result<Self> {
-        let service = ClientService::<A, S, D, E>::new(delegate, remote);
+        let service = ClientService::<A, S, D, Req, E>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
         Ok(Self { reactor, _phantom: PhantomData })
     }
@@ -425,16 +433,14 @@ where E: Send + 'static
 
     pub fn join(self) -> Result<(), Box<dyn Any + Send>> { self.reactor.join() }
 
-    pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
-        let mut buf = Vec::new();
-        data.marshall(&mut buf).expect("failed to marshall request");
+    pub(super) fn send_extra(&self, req: Req, extra: E) -> io::Result<()> {
         self.reactor
             .controller()
-            .cmd(ClientCommand::Send(buf, extra))
+            .cmd(ClientCommand::Send(req, extra))
     }
 }
 
-impl<Req: Frame> Client<Req> {
+impl<Req: Frame + Debug + 'static> Client<Req> {
     /// Sends a new request to the server.
     pub fn send(&self, req: Req) -> io::Result<()> { self.send_extra(req, ()) }
 }

@@ -115,13 +115,16 @@ pub trait ServiceController<
 
     fn on_timer(&mut self) {}
 
-    // TODO: Pass sender
     // TODO: Pass full remote information, including address and node id.
-    fn on_frame(&mut self, res_id: ResourceId, req: Self::InFrame);
+    fn on_frame(&mut self, remote_id: <S::Artifact as Artifact>::NodeId, req: Self::InFrame);
 
     /// Called on failure of frame parsing, before disconnecting the remote and calling
     /// [`on_disconnect`].
-    fn on_frame_unparsable(&mut self, res_id: ResourceId, err: &<Self::InFrame as Frame>::Error);
+    fn on_frame_unparsable(
+        &mut self,
+        remote_id: <S::Artifact as Artifact>::NodeId,
+        err: &<Self::InFrame as Frame>::Error,
+    );
 }
 
 // TODO: Consider using const generics to define whether service may have inbound and outbound
@@ -261,7 +264,7 @@ impl<
     fn handle_listener_event(
         &mut self,
         listener_fd: RawFd,
-        _res_id: ResourceId,
+        res_id: ResourceId,
         event: <Self::Listener as Resource>::Event,
         time: Timestamp,
     ) {
@@ -490,7 +493,7 @@ impl<
                 loop {
                     match marshaller.pop::<C::InFrame>() {
                         Ok(Some(frame)) => {
-                            self.controller.on_frame(res_id, frame);
+                            self.controller.on_frame(*remote_id, frame);
                         }
                         Ok(None) => {
                             // Buffer is empty, or frame isn't complete.
@@ -504,7 +507,7 @@ impl<
                                 #[cfg(feature = "log")]
                                 log::debug!(target: NAME, "Dropping read buffer for {remote_id} with {} bytes", marshaller.read_queue_len());
                             }
-                            self.controller.on_frame_unparsable(res_id, &err);
+                            self.controller.on_frame_unparsable(*remote_id, &err);
                             self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
                             break;
                         }

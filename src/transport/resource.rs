@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,6 +52,36 @@ const HEAP_BUFFER_SIZE: usize = u16::MAX as usize;
 const READ_TIMEOUT: Duration = Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+
+const NAME: &str = "transport";
+
+pub enum ImpossibleResource {}
+
+impl AsRawFd for ImpossibleResource {
+    fn as_raw_fd(&self) -> RawFd { unreachable!("non-instantiable enum") }
+}
+
+impl Write for ImpossibleResource {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> { unreachable!("non-instantiable enum") }
+
+    fn flush(&mut self) -> io::Result<()> { unreachable!("non-instantiable enum") }
+}
+
+impl WriteAtomic for ImpossibleResource {
+    fn is_ready_to_write(&self) -> bool { unreachable!("non-instantiable enum") }
+
+    fn empty_write_buf(&mut self) -> io::Result<bool> { unreachable!("non-instantiable enum") }
+
+    fn write_or_buf(&mut self, _: &[u8]) -> io::Result<()> { unreachable!("non-instantiable enum") }
+}
+
+impl Resource for ImpossibleResource {
+    type Event = ();
+
+    fn interests(&self) -> IoType { unreachable!("non-instantiable enum") }
+
+    fn handle_io(&mut self, _: Io) -> Option<Self::Event> { unreachable!("non-instantiable enum") }
+}
 
 /// An event happening for a [`NetAccept`] network listener and delivered to a
 /// [`reactor::Handler`].
@@ -115,10 +145,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
-        Ok(Self {
-            listener,
-            _phantom: default!(),
-        })
+        Ok(Self { listener, _phantom: default!() })
     }
 
     /// Binds listener to the provided socket address(es) with a given context. Same as
@@ -128,10 +155,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     pub fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind_reusable(addr)?;
         listener.set_nonblocking(true)?;
-        Ok(Self {
-            listener,
-            _phantom: default!(),
-        })
+        Ok(Self { listener, _phantom: default!() })
     }
 
     /// Returns the local [`net::SocketAddr`] on which listener accepts
@@ -168,13 +192,14 @@ where S: Send
 /// An event happening for a [`NetTransport`] network transport and delivered to
 /// a [`reactor::Handler`].
 pub enum SessionEvent<S: NetSession> {
-    Established(RawFd, S::Artifact),
+    Established(S::Artifact),
     Data(Vec<u8>),
     Terminated(io::Error),
 }
 
 /// A state of [`NetTransport`] network transport.
-#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
+#[display(lowercase)]
 pub enum TransportState {
     /// The transport is initiated, but the connection has not established yet.
     /// This happens only for outgoing connections due to the use of
@@ -237,16 +262,9 @@ impl<S: NetSession> NetTransport<S> {
     ///
     /// If a session can be put into a non-blocking mode.
     pub fn with_session(mut session: S, link_direction: Direction) -> io::Result<Self> {
-        let state = if session.is_established() {
-            // If we are disconnected, we will get instantly updated from the
-            // reactor and the state will change automatically
-            TransportState::Active
-        } else {
-            TransportState::Handshake
-        };
         session.as_connection_mut().set_nonblocking(true)?;
         Ok(Self {
-            state,
+            state: TransportState::Handshake,
             session,
             link_direction,
             write_intent: true,
@@ -282,8 +300,12 @@ impl<S: NetSession> NetTransport<S> {
         state: TransportState,
         link_direction: Direction,
     ) -> io::Result<Self> {
-        session.as_connection_mut().set_read_timeout(Some(READ_TIMEOUT))?;
-        session.as_connection_mut().set_write_timeout(Some(WRITE_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_read_timeout(Some(READ_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
             state,
             session,
@@ -310,14 +332,16 @@ impl<S: NetSession> NetTransport<S> {
     pub fn artifact(&self) -> Option<S::Artifact> { self.session.artifact() }
 
     pub fn expect_peer_id(&self) -> S::Artifact {
-        self.session.artifact().expect("session is expected to be established at this stage")
+        self.session
+            .artifact()
+            .expect("session is expected to be established at this stage")
     }
 
     pub fn write_buf_len(&self) -> usize { self.write_buffer.len() }
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Terminating session {self} due to {reason:?}");
+        log::trace!(target: NAME, "Terminating session {self} due to {reason:?}");
 
         self.state = TransportState::Terminated;
         SessionEvent::Terminated(reason)
@@ -343,7 +367,7 @@ impl<S: NetSession> NetTransport<S> {
                 .contains(&err.kind()) =>
             {
                 #[cfg(feature = "log")]
-                log::warn!(target: "transport", "Resource {} was not able to consume any data even though it has announced its write readiness", self.display());
+                log::warn!(target: NAME, "Resource {} was not able to consume any data even though it has announced its write readiness", self.display());
                 self.write_intent = true;
                 None
             }
@@ -365,7 +389,7 @@ impl<S: NetSession> NetTransport<S> {
                 // when there's data on the socket. We leave it here in case external
                 // conditions change.
                 #[cfg(feature = "log")]
-                log::warn!(target: "transport",
+                log::warn!(target: NAME,
                     "WOULD_BLOCK on resource which had read intent - probably normal thing to happen"
                 );
                 None
@@ -377,7 +401,7 @@ impl<S: NetSession> NetTransport<S> {
     fn flush_buffer(&mut self) -> io::Result<()> {
         let orig_len = self.write_buffer.len();
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Resource {} is flushing its buffer of {orig_len} bytes", self.display());
+        log::trace!(target: NAME, "Resource {} is flushing its buffer of {orig_len} bytes", self.display());
         let len =
             self.session.write(self.write_buffer.make_contiguous()).or_else(|err| {
                 match err.kind() {
@@ -386,23 +410,23 @@ impl<S: NetSession> NetTransport<S> {
                     | io::ErrorKind::WriteZero
                     | io::ErrorKind::Interrupted => {
                         #[cfg(feature = "log")]
-                        log::warn!(target: "transport", "Resource {} kernel buffer is fulled (system message is '{err}')", self.display());
+                        log::warn!(target: NAME, "Resource {} kernel buffer is fulled (system message is '{err}')", self.display());
                         Ok(0)
                     },
                     _ => {
                         #[cfg(feature = "log")]
-                        log::error!(target: "transport", "Resource {} failed write operation with message '{err}'", self.display());
+                        log::error!(target: NAME, "Resource {} failed write operation with message '{err}'", self.display());
                         Err(err)
                     },
                 }
             })?;
         if orig_len > len {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.display());
+            log::debug!(target: NAME, "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = true;
         } else {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Resource {} was able to consume all of the buffered data ({len} of {orig_len} bytes)", self.display());
+            log::trace!(target: NAME, "Resource {} was able to consume all the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = false;
         }
         self.write_buffer.drain(..len);
@@ -427,17 +451,19 @@ impl<S: NetSession> Resource for NetTransport<S> {
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
         debug_assert_ne!(self.state, TransportState::Terminated, "I/O on terminated transport");
 
+        #[cfg(feature = "log")]
+        log::trace!(target: NAME, "Handling I/O on transport {self} with {io:?} intent while in {} state", self.state);
+
         let mut force_write_intent = false;
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Transport {self} is connected, initializing handshake");
+            log::debug!(target: NAME, "Transport {self} is connected, initializing handshake");
 
             force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
-            debug_assert!(!self.session.is_established());
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
+            log::trace!(target: NAME, "Transport {self} got I/O while in handshake mode");
         }
 
         let resp = match io {
@@ -456,19 +482,18 @@ impl<S: NetSession> Resource for NetTransport<S> {
             && self.state != TransportState::Handshake
         {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Peer {self} has reset the connection");
+            log::debug!(target: NAME, "Peer {self} has reset the connection");
 
             self.state = TransportState::Terminated;
             resp
-        } else if self.session.is_established() && self.state == TransportState::Handshake {
+        } else if self.session.is_established() && self.state != TransportState::Active {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Handshake with {self} is complete");
+            log::debug!(target: NAME, "Handshake with {self} is complete");
 
             // We just got connected; may need to send output
             self.write_intent = true;
             self.state = TransportState::Active;
             Some(SessionEvent::Established(
-                self.as_raw_fd(),
                 self.session.artifact().expect("session is established"),
             ))
         } else {
@@ -493,7 +518,9 @@ impl<S: NetSession> Write for NetTransport<S> {
 }
 
 impl<S: NetSession> WriteAtomic for NetTransport<S> {
-    fn is_ready_to_write(&self) -> bool { self.state == TransportState::Active }
+    fn is_ready_to_write(&self) -> bool {
+        self.state == TransportState::Active || self.session.is_established()
+    }
 
     fn empty_write_buf(&mut self) -> io::Result<bool> {
         let len = self.session.write(self.write_buffer.make_contiguous())?;

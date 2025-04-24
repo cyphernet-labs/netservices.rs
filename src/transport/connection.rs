@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,15 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+#[cfg(feature = "nonblocking")]
 use std::os::fd::IntoRawFd;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 use cyphernet::addr::{Addr, InetHost, NetAddr};
+
+#[allow(dead_code)]
+const NAME: &str = "connection";
 
 pub trait Address: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 impl<T> Address for T where T: Addr + Send + Clone + Eq + Hash + Debug + Display {}
@@ -88,7 +92,10 @@ impl NetConnection for TcpStream {
     type Addr = NetAddr<InetHost>;
 
     fn connect_blocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
-        let socket_addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let socket_addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         TcpStream::connect_timeout(&socket_addr, timeout)
     }
 
@@ -156,7 +163,10 @@ impl NetConnection for socket2::Socket {
 
     #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr, _timeout: Duration) -> io::Result<Self> {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_nonblocking(true)?;
@@ -164,37 +174,43 @@ impl NetConnection for socket2::Socket {
         match socket2::Socket::connect(&socket, &addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", addr);
+                log::debug!(target: NAME, "Connected to {}", addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+                log::debug!(target: NAME, "Connecting to {} in a non-blocking way", addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                log::error!(target: NAME, "Can't connect to {}: address already in use", addr);
                 return Err(io::Error::from(io::ErrorKind::AlreadyExists));
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+                log::error!(target: NAME, "Can't connect to {} in a non-blocking way", addr);
             }
             Err(e) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                log::debug!(target: NAME, "Error connecting to {}: {}", addr, e);
                 return Err(e);
             }
         }
         Ok(socket)
     }
 
+    #[cfg(feature = "nonblocking")]
     fn connect_reusable_nonblocking(
         local_addr: Self::Addr,
         remote_addr: Self::Addr,
     ) -> io::Result<Self> {
-        let local_addr = local_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
-        let remote_addr =
-            remote_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let local_addr = local_addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        let remote_addr = remote_addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(local_addr),
             socket2::Type::STREAM,
@@ -211,24 +227,24 @@ impl NetConnection for socket2::Socket {
         match socket2::Socket::connect(&socket, &remote_addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", remote_addr);
+                log::debug!(target: NAME, "Connected to {}", remote_addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", remote_addr);
+                log::debug!(target: NAME, "Connecting to {} in a non-blocking way", remote_addr);
             }
             Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", remote_addr);
+                log::error!(target: NAME, "Can't connect to {}: address already in use", remote_addr);
                 return Err(io::Error::from(io::ErrorKind::AlreadyExists));
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", remote_addr);
+                log::error!(target: NAME, "Can't connect to {} in a non-blocking way", remote_addr);
             }
             Err(e) => {
                 #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", remote_addr, e);
+                log::debug!(target: NAME, "Error connecting to {}: {}", remote_addr, e);
                 return Err(e);
             }
         }

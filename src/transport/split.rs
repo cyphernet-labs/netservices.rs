@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 use std::io;
 use std::net::TcpStream;
 
-use crate::connection::AsConnection;
+use crate::transport::AsConnection;
 use crate::{NetConnection, NetSession, NetStateMachine};
 
 #[derive(Debug, Display)]
@@ -113,20 +113,11 @@ impl SplitIo for TcpStream {
         match self.try_clone() {
             Ok(clone) => {
                 let unique_id = rand::random();
-                let reader = TcpReader {
-                    unique_id,
-                    connection: clone,
-                };
-                let writer = TcpWriter {
-                    unique_id,
-                    connection: self,
-                };
+                let reader = TcpReader { unique_id, connection: clone };
+                let writer = TcpWriter { unique_id, connection: self };
                 Ok((reader, writer))
             }
-            Err(error) => Err(SplitIoError {
-                original: self,
-                error,
-            }),
+            Err(error) => Err(SplitIoError { original: self, error }),
         }
     }
 
@@ -147,20 +138,11 @@ impl SplitIo for socket2::Socket {
         match self.try_clone() {
             Ok(clone) => {
                 let unique_id = rand::random();
-                let reader = TcpReader {
-                    unique_id,
-                    connection: clone,
-                };
-                let writer = TcpWriter {
-                    unique_id,
-                    connection: self,
-                };
+                let reader = TcpReader { unique_id, connection: clone };
+                let writer = TcpWriter { unique_id, connection: self };
                 Ok((reader, writer))
             }
-            Err(error) => Err(SplitIoError {
-                original: self,
-                error,
-            }),
+            Err(error) => Err(SplitIoError { original: self, error }),
         }
     }
 

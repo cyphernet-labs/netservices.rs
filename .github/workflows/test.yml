@@ -2,25 +2,28 @@ name: Tests
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
+    tags:
+      - 'v[0-9]+.*'
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
+      - develop
+      - 'v[0-9]+.?*'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   testing:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-13, macos-latest ]
     steps:
-      - uses: actions/checkout@v2
-      - name: Install latest stable
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - name: Build & test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace --all-features --no-fail-fast
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test ${{matrix.os}}
+        run: cargo test --workspace --all-features --no-fail-fast

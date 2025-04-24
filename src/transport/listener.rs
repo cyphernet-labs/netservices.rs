@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 
-use crate::connection::NetConnection;
+use crate::transport::NetConnection;
 
 pub trait NetListener: AsRawFd + Send {
     type Stream: NetConnection;
@@ -97,7 +97,10 @@ impl NetListener for socket2::Socket {
 
     fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket2::Socket::bind(&socket, &addr.into())?;
@@ -106,7 +109,10 @@ impl NetListener for socket2::Socket {
 
     fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized {
-        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_reuse_address(true)?;

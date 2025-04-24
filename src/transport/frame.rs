@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,13 +23,13 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
 pub trait Frame: Send + Sized {
-    type Error: std::error::Error + Send;
+    type Error: std::error::Error + Sync + Send + 'static;
 
     /// Reads frame from the stream.
     ///
     /// If the stream doesn't contain the whole message yet must return `Ok(None)`
     fn unmarshall(reader: impl Read) -> Result<Option<Self>, Self::Error>;
-    fn marshall(&self, writer: impl Write) -> Result<usize, Self::Error>;
+    fn marshall(&self, writer: impl Write) -> Result<(), Self::Error>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,12 +39,7 @@ pub struct Marshaller {
 }
 
 impl Marshaller {
-    pub fn new() -> Self {
-        Self {
-            read_queue: VecDeque::new(),
-            write_queue: VecDeque::new(),
-        }
-    }
+    pub fn new() -> Self { Self { read_queue: VecDeque::new(), write_queue: VecDeque::new() } }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -54,7 +49,9 @@ impl Marshaller {
     }
 
     pub fn push<F: Frame>(&mut self, frame: F) {
-        frame.marshall(&mut self.write_queue).expect("in-memory write operation");
+        frame
+            .marshall(&mut self.write_queue)
+            .expect("in-memory write operation");
     }
 
     pub fn pop<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {
@@ -68,7 +65,8 @@ impl Marshaller {
         Ok(frame)
     }
 
-    pub fn queue_len(&self) -> usize { self.write_queue.len() }
+    pub fn read_queue_len(&self) -> usize { self.read_queue.len() }
+    pub fn write_queue_len(&self) -> usize { self.write_queue.len() }
 
     /// # Errors
     ///

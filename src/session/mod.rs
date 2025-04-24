@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2023 by
+// Written in 2022-2025 by
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
-// Copyright 2022-2023 Cyphernet DAO, Switzerland
+// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 #[cfg(feature = "eidolon")]
 use std::net::TcpStream;
 #[cfg(feature = "eidolon")]
@@ -35,7 +36,7 @@ use cyphernet::encrypt::noise::NoiseState;
 use cyphernet::encrypt::noise::{HandshakePattern, Keyset};
 use cyphernet::proxy::socks5;
 #[cfg(feature = "eidolon")]
-use cyphernet::{x25519, Cert, Digest, EcSign};
+use cyphernet::{Cert, Digest, EcSign, x25519};
 
 #[cfg(feature = "eidolon")]
 use crate::Direction;
@@ -190,12 +191,20 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     }
 }
 
+pub trait NodeId: Copy + Eq + Ord + Hash + Send + Debug + Display {}
+impl<T: Copy + Eq + Ord + Hash + Send + Debug + Display> NodeId for T {}
+
+pub trait Artifact {
+    type NodeId: NodeId;
+    fn remote_id(&self) -> Option<Self::NodeId>;
+}
+
 pub trait NetSession: NetStream + SplitIo {
     /// Inner session type
     type Inner: NetSession;
     /// Underlying connection
     type Connection: NetConnection;
-    type Artifact: Display;
+    type Artifact: Artifact + Display;
 
     fn is_established(&self) -> bool { self.artifact().is_some() }
     fn run_handshake(&mut self) -> io::Result<()>;
@@ -224,7 +233,7 @@ pub trait NetStateMachine: Sized + Send {
     const NAME: &'static str;
 
     type Init: Debug;
-    type Artifact;
+    type Artifact: Artifact;
     type Error: error::Error;
 
     fn init(&mut self, init: Self::Init);
@@ -284,6 +293,12 @@ pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
     pub state: M::Artifact,
 }
 
+impl<M: NetStateMachine, S: NetSession> Artifact for ProtocolArtifact<M, S> {
+    type NodeId = <M::Artifact as Artifact>::NodeId;
+
+    fn remote_id(&self) -> Option<Self::NodeId> { self.state.remote_id() }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NetProtocol<M: NetStateMachine, S: NetSession>
 where S::Artifact: IntoInit<M::Init>
@@ -300,12 +315,7 @@ where S::Artifact: IntoInit<M::Init>
         Self::with(session, M::default())
     }
 
-    pub fn with(session: S, state_machine: M) -> Self {
-        Self {
-            state: state_machine,
-            session,
-        }
-    }
+    pub fn with(session: S, state_machine: M) -> Self { Self { state: state_machine, session } }
 
     fn init(&mut self) -> bool {
         if !self.state.is_init() {
@@ -415,11 +425,7 @@ where S::Artifact: IntoInit<M::Init>
             }
         }
 
-        if buf.is_empty() {
-            Ok(0)
-        } else {
-            Err(io::ErrorKind::Interrupted.into())
-        }
+        if buf.is_empty() { Ok(0) } else { Err(io::ErrorKind::Interrupted.into()) }
     }
 
     fn flush(&mut self) -> io::Result<()> { self.session.flush() }
@@ -440,10 +446,7 @@ where S::Artifact: IntoInit<M::Init>
         match self.session.split_io() {
             Err(err) => {
                 self.session = err.original;
-                Err(SplitIoError {
-                    original: self,
-                    error: err.error,
-                })
+                Err(SplitIoError { original: self, error: err.error })
             }
             Ok((reader, writer)) => Ok((NetReader { unique_id, reader }, NetWriter {
                 unique_id,
@@ -502,6 +505,12 @@ mod imp_std {
 
     use super::*;
 
+    impl Artifact for SocketAddr {
+        type NodeId = Self;
+
+        fn remote_id(&self) -> Option<Self::NodeId> { Some(*self) }
+    }
+
     impl NetSession for TcpStream {
         type Inner = Self;
         type Connection = Self;
@@ -550,7 +559,7 @@ mod imp_eidolon {
 
     use cyphernet::auth::eidolon;
     use cyphernet::display::{Encoding, MultiDisplay};
-    use cyphernet::{Cert, CertFormat, Digest, EcSign, Ecdh};
+    use cyphernet::{Cert, CertFormat, Digest, EcPk, EcSig, EcSign, Ecdh};
 
     use super::*;
 
@@ -561,17 +570,11 @@ mod imp_eidolon {
 
     impl<S: EcSign> EidolonRuntime<S> {
         pub fn initiator(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
-            Self {
-                state: EidolonState::initiator(cert, allowed_ids),
-                signer,
-            }
+            Self { state: EidolonState::initiator(cert, allowed_ids), signer }
         }
 
         pub fn responder(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
-            Self {
-                state: EidolonState::responder(cert, allowed_ids),
-                signer,
-            }
+            Self { state: EidolonState::responder(cert, allowed_ids), signer }
         }
     }
 
@@ -584,6 +587,12 @@ mod imp_eidolon {
                 None => f.write_str("<unidentified>"),
             }
         }
+    }
+
+    impl<S: EcSig> Artifact for Cert<S> {
+        type NodeId = <S::Pk as EcPk>::Compressed;
+
+        fn remote_id(&self) -> Option<Self::NodeId> { Some(self.pk.to_pk_compressed()) }
     }
 
     impl<S: EcSign> NetStateMachine for EidolonRuntime<S> {
@@ -615,8 +624,8 @@ mod imp_eidolon {
 pub use imp_eidolon::EidolonRuntime;
 
 mod impl_noise {
-    use cyphernet::encrypt::noise::error::NoiseError;
     use cyphernet::encrypt::noise::NoiseState;
+    use cyphernet::encrypt::noise::error::NoiseError;
     use cyphernet::{Digest, EcPk, Ecdh};
 
     use super::*;
@@ -627,12 +636,17 @@ mod impl_noise {
         pub remote_static_key: Option<E::Pk>,
     }
 
+    impl<E: Ecdh, D: Digest> Artifact for NoiseArtifact<E, D> {
+        type NodeId = <E::Pk as EcPk>::Compressed;
+
+        fn remote_id(&self) -> Option<Self::NodeId> {
+            self.remote_static_key.as_ref().map(EcPk::to_pk_compressed)
+        }
+    }
+
     impl<E: Ecdh, D: Digest> NoiseArtifact<E, D> {
         pub fn with(handshake_hash: D::Output, remote_static_key: Option<E::Pk>) -> Self {
-            NoiseArtifact {
-                handshake_hash,
-                remote_static_key,
-            }
+            NoiseArtifact { handshake_hash, remote_static_key }
         }
 
         pub fn to_vec(&self) -> Vec<u8> {
@@ -667,6 +681,8 @@ mod impl_noise {
 }
 
 mod impl_socks5 {
+    use std::convert::Infallible;
+
     use cyphernet::addr::Host;
     #[cfg(not(feature = "eidolon"))]
     use cyphernet::addr::{HostName, NetAddr};
@@ -674,6 +690,14 @@ mod impl_socks5 {
     use cyphernet::proxy::socks5::Socks5;
 
     use super::*;
+
+    impl Artifact for NetAddr<HostName> {
+        type NodeId = Infallible;
+
+        fn remote_id(&self) -> Option<Self::NodeId> {
+            panic!("NetAddr must not be used as a NodeId")
+        }
+    }
 
     impl NetStateMachine for Socks5 {
         const NAME: &'static str = "socks5";

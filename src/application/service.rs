@@ -32,7 +32,9 @@ use std::{io, net, thread};
 
 use cyphernet::addr::{Addr, ToSocketAddr};
 use reactor::poller::popol;
-use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
+use reactor::runtimes::ReactorHandler;
+use reactor::runtimes::net::{Action, Error, ResourceType};
+use reactor::{Reactor, Resource, ResourceId, Timestamp};
 
 use crate::remotes::{DisconnectReason, Inbound, Outbound, Remote, Remotes};
 use crate::{
@@ -47,7 +49,7 @@ const NAME: &str = "net-service";
 #[derive(Debug)]
 pub enum ServiceCommand<Id, R: Frame> {
     /// Send raw data to the remote server. Second argument is an extension block which allows
-    /// downstream implementations of specific client-server  to provide callbacks for RPC
+    /// downstream implementations of specific client-server to provide callbacks for RPC
     /// request-reply pairs.
     Send(Id, R),
 
@@ -271,15 +273,72 @@ impl<
     L: NetListener<Stream = S::Connection>,
     C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
     Cmd: Debug + Send,
-> reactor::Handler for Service<S, L, C, Cmd>
+> ReactorHandler for Service<S, L, C, Cmd>
 {
-    type Listener = NetAccept<S, L>;
-    type Transport = NetTransport<S>;
     type Command = Cmd;
+    type Action = Action<NetAccept<S, L>, NetTransport<S>>;
+    type Error = Error<NetAccept<S, L>, NetTransport<S>>;
+
+    fn handle_error(&mut self, err: Self::Error) {
+        match err {
+            #[allow(unused_variables)]
+            Error::Poll(err) => {
+                // TODO: This should be a fatal error, there's nothing we can do here.
+                #[cfg(feature = "log")]
+                log::error!(target: NAME, "Can't poll connections: {err}");
+            }
+            #[allow(unused_variables)]
+            Error::ListenerDisconnect(res_id, _) => {
+                // TODO: This should be a fatal error, there's nothing we can do here.
+                #[cfg(feature = "log")]
+                log::error!(target: NAME, "Listener {res_id} disconnected");
+            }
+            Error::TransportDisconnect(res_id, transport) => {
+                let fd = transport.as_raw_fd();
+                #[cfg(feature = "log")]
+                log::error!(target: NAME, "Remote id={res_id} (fd={fd}) disconnected");
+
+                // We're dropping the transport (and underlying network connection) here.
+                drop(transport);
+
+                // The remote transport is already disconnected and removed from the reactor;
+                // therefore there is no need to initiate a disconnection. We simply remove
+                // the remote from the map.
+                match self.remotes.remove(&res_id) {
+                    Some(remote) => {
+                        if let Some(id) = remote.remote_id() {
+                            self.controller.on_disconnected(
+                                id,
+                                remote.direction(),
+                                &DisconnectReason::connection(),
+                            );
+                        } else {
+                            #[cfg(feature = "log")]
+                            log::debug!(target: NAME, "Inbound disconnection before handshake; ignoring")
+                        }
+                    }
+                    None => self.cleanup(res_id, fd),
+                }
+            }
+        }
+    }
 
     fn tick(&mut self, time: Timestamp) { self.controller.on_tick(time, &self.metrics) }
 
     fn handle_timer(&mut self) { self.controller.on_timer() }
+
+    fn handle_command(&mut self, cmd: Cmd) { self.controller.on_command(cmd); }
+}
+
+impl<
+    S: NetSession,
+    L: NetListener<Stream = S::Connection>,
+    C: ServiceController<<S::Connection as NetConnection>::Addr, S, L, Cmd>,
+    Cmd: Debug + Send,
+> reactor::runtimes::net::Handler for Service<S, L, C, Cmd>
+{
+    type Listener = NetAccept<S, L>;
+    type Transport = NetTransport<S>;
 
     fn handle_listener_event(
         &mut self,
@@ -567,52 +626,6 @@ impl<
         }
     }
 
-    fn handle_command(&mut self, cmd: Cmd) { self.controller.on_command(cmd); }
-
-    fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
-        match err {
-            #[allow(unused_variables)]
-            Error::Poll(err) => {
-                // TODO: This should be a fatal error, there's nothing we can do here.
-                #[cfg(feature = "log")]
-                log::error!(target: NAME, "Can't poll connections: {err}");
-            }
-            #[allow(unused_variables)]
-            Error::ListenerDisconnect(res_id, _) => {
-                // TODO: This should be a fatal error, there's nothing we can do here.
-                #[cfg(feature = "log")]
-                log::error!(target: NAME, "Listener {res_id} disconnected");
-            }
-            Error::TransportDisconnect(res_id, transport) => {
-                let fd = transport.as_raw_fd();
-                #[cfg(feature = "log")]
-                log::error!(target: NAME, "Remote id={res_id} (fd={fd}) disconnected");
-
-                // We're dropping the transport (and underlying network connection) here.
-                drop(transport);
-
-                // The remote transport is already disconnected and removed from the reactor;
-                // therefore there is no need to initiate a disconnection. We simply remove
-                // the remote from the map.
-                match self.remotes.remove(&res_id) {
-                    Some(remote) => {
-                        if let Some(id) = remote.remote_id() {
-                            self.controller.on_disconnected(
-                                id,
-                                remote.direction(),
-                                &DisconnectReason::connection(),
-                            );
-                        } else {
-                            #[cfg(feature = "log")]
-                            log::debug!(target: NAME, "Inbound disconnection before handshake; ignoring")
-                        }
-                    }
-                    None => self.cleanup(res_id, fd),
-                }
-            }
-        }
-    }
-
     fn handover_listener(
         &mut self,
         #[allow(unused_variables)] res_id: ResourceId,
@@ -702,9 +715,7 @@ impl<
 /// The client runtime containing reactor thread managing connection to the remote peers and the
 /// use of the node APIs.
 pub struct Runtime<Cmd: Debug + Send> {
-    reactor: Reactor<Cmd, popol::Poller>, /* seems we do not need to pass any commands to
-                                           * the
-                                           * reactor */
+    reactor: Reactor<reactor::runtimes::net::Runtime<Cmd, popol::Poller>>,
 }
 
 impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {
@@ -730,7 +741,7 @@ impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {
 
     pub fn cmd(&mut self, cmd: Cmd) -> io::Result<()> { self.reactor.controller().cmd(cmd) }
 
-    pub fn sender(&self) -> reactor::Controller<Cmd, popol::PopolWaker> {
+    pub fn sender(&self) -> reactor::runtimes::Controller<Cmd, popol::PopolWaker> {
         self.reactor.controller().clone()
     }
 

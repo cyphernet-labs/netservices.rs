@@ -467,6 +467,14 @@ impl<S: NetSession> Resource for NetTransport<S> {
         }
 
         let resp = match io {
+            Io::Read if self.state == TransportState::Handshake => {
+                // We need to read empty data to push the handshake forward
+                if let Err(err) = self.session.read(&mut []) {
+                    Some(self.terminate(err))
+                } else {
+                    None
+                }
+            }
             Io::Read => self.handle_readable(),
             Io::Write => self.handle_writable(),
         };

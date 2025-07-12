@@ -521,7 +521,7 @@ impl<
                         }
                         Err(err) => {
                             #[cfg(feature = "log")]
-                            log::error!(target: NAME, "Invalid gossip message from {remote_id}: {err}");
+                            log::error!(target: NAME, "Invalid message from {remote_id}: {err}");
 
                             if marshaller.read_queue_len() != 0 {
                                 #[cfg(feature = "log")]

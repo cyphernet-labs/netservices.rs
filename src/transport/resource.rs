@@ -24,10 +24,10 @@
 //! for I/O events in a non-blocking but synchronous mode in a dedicated reactor
 //! thread.
 //!
-//! The module  allows to solve [C10k] problem with multiple connections by
+//! The module allows solving [C10k] problem with multiple connections by
 //! utilizing non-blocking `poll` sys-calls. It uses the same principle as
-//! async runtimes (`tokio` and others), but provides much simpler API and can
-//! run without heap of dependencies introduced by async runtimes.
+//! async runtimes (`tokio` and others), but provides a much simpler API and can
+//! run without a heap of dependencies introduced by async runtimes.
 //!
 //! [C10k]: https://en.wikipedia.org/wiki/C10k_problem
 
@@ -89,8 +89,8 @@ impl Resource for ImpossibleResource {
 pub enum ListenerEvent<S: NetSession> {
     /// A new incoming connection was accepted.
     ///
-    /// The connection is already upgraded to a [`NetSession`], however no I/O
-    /// events was read or wrote for it yet.
+    /// The connection is already upgraded to a [`NetSession`], however, no I/O
+    /// events were read or written for it yet.
     Accepted(S::Connection),
 
     /// Listener `accept` call has resulted in a I/O error from the OS.
@@ -107,7 +107,7 @@ pub struct NetAccept<S: NetSession, L: NetListener<Stream = S::Connection> = Tcp
     /// authentication and other protocols which are a part of the application-
     /// specific transport layer and are automatically injected into the
     /// new sessions constructed by this listener before they are inserted into
-    /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
+    /// the [`reactor`], and notifications are delivered to [`reactor::Handler`].
     listener: L,
     _phantom: PhantomData<S>,
 }
@@ -135,20 +135,20 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteAtomic for NetA
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
-    /// Binds listener to the provided socket address(es) with a given context.
+    /// Binds the listener to the provided socket address(es) with a given context.
     ///
     /// The `session_context` object provides information for encryption,
     /// authentication and other protocols which are a part of the application-
     /// specific transport layer and are automatically injected into the
     /// new sessions constructed by this listener before they are inserted into
-    /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
+    /// the [`reactor`], and notifications are delivered to [`reactor::Handler`].
     pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
         Ok(Self { listener, _phantom: default!() })
     }
 
-    /// Binds listener to the provided socket address(es) with a given context. Same as
+    /// Binds the listener to the provided socket address(es) with a given context. Same as
     /// [`NetAccept::bind`] except that it uses `SO_REUSEADDR`/`SO_REUSEPORT` to enable more
     /// sockets to bound to the same address.
     #[cfg(feature = "nonblocking")]
@@ -158,7 +158,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         Ok(Self { listener, _phantom: default!() })
     }
 
-    /// Returns the local [`net::SocketAddr`] on which listener accepts
+    /// Returns the local [`net::SocketAddr`] on which the listener accepts
     /// connections.
     pub fn local_addr(&self) -> net::SocketAddr { self.listener.local_addr() }
 
@@ -202,9 +202,9 @@ pub enum SessionEvent<S: NetSession> {
 #[display(lowercase)]
 pub enum TransportState {
     /// The transport is initiated, but the connection has not established yet.
-    /// This happens only for outgoing connections due to the use of
+    /// This happens only for outgoing connections due to the use of a
     /// non-blocking version of a `connect` sys-call. The state is switched once
-    /// we receive first notification on a `write` event on this resource from
+    /// we receive the first notification on a `write` event on this resource from
     /// the reactor `poll`.
     Init,
 
@@ -216,7 +216,7 @@ pub enum TransportState {
     /// The session is active; all handshakes had completed.
     Active,
 
-    /// Session was terminated by any reason: local shutdown, remote orderly
+    /// Session was terminated for any reason: local shutdown, remote orderly
     /// shutdown, connectivity issue, dropped connections, encryption or
     /// authentication problem etc. Reading and writing from the resource in
     /// this state will result in an error ([`io::Error`]).
@@ -224,7 +224,7 @@ pub enum TransportState {
 }
 
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
-/// session management, including optional handshake, encoding etc) to be used
+/// session management, including optional handshake, encoding, etc) to be used
 /// as a transport resource in a [`reactor::Reactor`].
 #[derive(Debug)]
 pub struct NetTransport<S: NetSession> {
@@ -254,7 +254,7 @@ impl<S: NetSession> NetTransport<S> {
         Self::with_state(session, TransportState::Handshake, Direction::Inbound)
     }
 
-    /// Constructs reactor-managed resource around an existing [`NetSession`].
+    /// Constructs a reactor-managed resource around an existing [`NetSession`].
     ///
     /// NB: Must not be called for connections created in a non-blocking mode!
     ///
@@ -283,7 +283,7 @@ impl<S: NetSession> NetTransport<S> {
     ///
     /// Returns the consumed `self` as a part of an error.
     ///
-    /// If the write buffer can't be emptied in a non-blocking way errors with
+    /// If the write buffer can't be emptied in a non-blocking way, errors with
     /// [`io::ErrorKind::WouldBlock`] kind of [`io::Error`].
     ///
     /// If the connection is failed and the write buffer has some data, errors

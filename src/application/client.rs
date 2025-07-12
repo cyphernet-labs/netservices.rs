@@ -45,8 +45,8 @@ const NAME: &str = "net-client";
 /// from inside the reactor thread to [`ClientService`] existing in the reactor thread.
 #[derive(Debug)]
 pub enum ClientCommand<R: Frame> {
-    /// Send raw data to the remote server. Second argument is an extension block which allows
-    /// downstream implementations of specific client-server  to provide callbacks for RPC
+    /// Send raw data to the remote server. The second argument is an extension block that allows
+    /// downstream implementations of a specific client-server to provide callbacks for RPC
     /// request-reply pairs.
     Send(R),
 
@@ -59,9 +59,9 @@ pub enum ClientCommand<R: Frame> {
 /// the server). Returned by [`ConnectionDelegate::on_disconnect`] method.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum OnDisconnect {
-    /// Terminates the client, stopping the reactor, completing its thread and making client object
-    /// unusable (calls to [`Client`] methods with result in [`io::Error`] coming from the closed
-    /// communication channel with the reactor).
+    /// Terminates the client, stopping the reactor, completing its thread and making a client
+    /// object unusable (calls to [`Client`] methods with a result in [`io::Error`] coming from
+    /// the closed communication channel with the reactor).
     Terminate,
 
     /// Tries to reconnect to the server using [`ConnectionDelegate::connect`] method, informing it
@@ -82,7 +82,7 @@ pub trait ConnectionDelegate<A, S: NetSession>:
     fn connect(&mut self, remote: &A) -> S;
 
     /// Notifies about the successful establishment of the session with the server. The `attempt`
-    /// argument specifies the number of the connection attempt which has succeeded, if a
+    /// argument specifies the number of the connection attempts which has succeeded if a
     /// reconnection or failed connection had happened.
     fn on_established(&mut self, artifact: S::Artifact, attempt: usize);
 
@@ -103,8 +103,8 @@ pub trait ClientDelegate<A, S: NetSession>: ConnectionDelegate<A, S> {
     /// Callback for processing the message received from the server.
     fn on_reply(&mut self, reply: Self::Reply);
 
-    /// Callback for processing invalid message received from the server which can't be parsed into
-    /// [`Self::Reply`] type.
+    /// Callback for processing an invalid message received from the server which can't be parsed
+    /// into [`Self::Reply`] type.
     fn on_reply_unparsable(&mut self, err: <Self::Reply as Frame>::Error);
 }
 
@@ -121,7 +121,7 @@ pub trait ClientDelegate<A, S: NetSession>: ConnectionDelegate<A, S> {
 /// - `D`: client delegate which callbacks are called for managing connectivity and processing
 ///   incoming messages (see also `delegate` above);
 /// - `E`: extension argument passed to the delegate, which can be used to provide callbacks for
-///   server replies in RPC protocols and server published messages in PubSub protocols.
+///   server replies in RPC protocols and server-published messages in PubSub protocols.
 struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S>> {
     /// Connection and messaging delegate providing callbacks for managing server connectivity and
     /// processing its messages.
@@ -130,7 +130,7 @@ struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S>> {
     remote: A,
     /// Holds reactor [`ResourceId`] assigned to the server connection.
     connection_id: Option<ResourceId>,
-    /// Holds file descriptor of the server connection.
+    /// Holds a file descriptor of the server connection.
     connection_fd: Option<RawFd>,
     /// Tracks the status of the connection. Set to true when the service tries to establish the
     /// connection or has an established connection, i.e. before [`ConnectionDelegate::connect`]
@@ -149,8 +149,8 @@ struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S>> {
 }
 
 impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> ClientService<A, S, D> {
-    /// Constructs new reactor handler providing delegate and remote server address. Will attempt to
-    /// connect to the server automatically once the reactor thread has started.
+    /// Constructs a new reactor handler providing delegate and remote server address. Will attempt
+    /// to connect to the server automatically once the reactor thread has started.
     #[inline]
     pub fn new(delegate: D, remote: A) -> Self {
         #[cfg(feature = "log")]
@@ -167,7 +167,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> ClientService<A, S, D> {
         }
     }
 
-    /// Convenience method running scenario of establishing server connection, notifying the
+    /// Convenience method running a scenario of establishing server connection, notifying the
     /// delegate on failed attempts and repeating attempts if instructed by the delegate to do so.
     /// When the connection is established, creates a transport instance and instructs the reactor
     /// to register the transport.
@@ -209,8 +209,8 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> ClientService<A, S, D> {
         }
     }
 
-    /// Adds terminate action to the action queue, such that on the next reactor event loop run it
-    /// will receive it and close the connection to the server.
+    /// Adds terminate action to the action queue, such that on the next reactor event loop run,
+    /// it will receive it and close the connection to the server.
     fn terminate(&mut self) {
         #[cfg(feature = "log")]
         log::info!(target: NAME, "Scheduling to terminate the reactor and client service");
@@ -371,9 +371,9 @@ pub struct Client<R: Frame> {
 }
 
 impl<R: Frame + Debug + 'static> Client<R> {
-    /// Constructs new client for client-server protocol. Takes service callback delegate and remote
-    /// server address. Will attempt to connect to the server automatically once the reactor thread
-    /// has started.
+    /// Constructs a new client for client-server protocol. Takes service callback delegate and
+    /// remote server address. Will attempt to connect to the server automatically once the
+    /// reactor thread has started.
     pub fn new<
         A: Send + 'static,
         S: NetSession + 'static,

@@ -46,8 +46,8 @@ const NAME: &str = "net-service";
 /// thread.
 #[derive(Debug)]
 pub enum ServiceCommand<Id, R: Frame> {
-    /// Send raw data to the remote server. Second argument is an extension block which allows
-    /// downstream implementations of specific client-server  to provide callbacks for RPC
+    /// Send raw data to the remote server. The second argument is an extension block that allows
+    /// downstream implementations of a specific client-server to provide callbacks for RPC
     /// request-reply pairs.
     Send(Id, R),
 

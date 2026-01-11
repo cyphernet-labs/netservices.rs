@@ -39,6 +39,6 @@ features = []
 rustc-args = ["--cfg", "docsrs"]
 
 [patch.crates-io]
-io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "v0.6" }
+io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "develop" }
 cyphergraphy = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }
 cypheraddr = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "master" }

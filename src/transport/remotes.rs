@@ -163,7 +163,7 @@ impl<A: Addr, I: NodeId> Remotes<A, I> {
         self.0.get_mut(res_id)
     }
 
-    pub fn entry(&mut self, res_id: ResourceId) -> hash_map::Entry<ResourceId, Remote<A, I>> {
+    pub fn entry(&mut self, res_id: ResourceId) -> hash_map::Entry<'_, ResourceId, Remote<A, I>> {
         self.0.entry(res_id)
     }
 

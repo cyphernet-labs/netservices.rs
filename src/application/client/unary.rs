@@ -22,12 +22,11 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::os::fd::{AsRawFd, RawFd};
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
 use amplify::CursorDeque;
+use crossbeam_channel::{Receiver, Sender};
 use reactor::poller::popol;
 use reactor::poller::popol::PopolWaker;
 use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
@@ -314,7 +313,7 @@ impl<C: SessionFactory, Rq: Request> UnaryClient<C, Rq> {
         let service = Service::new(iface);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
         let controller = reactor.controller();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = crossbeam_channel::unbounded();
         let factory = Factory::new(session_factory, receiver, controller);
         let factory = factory.run();
         Ok(Self { factory, sender, reactor })

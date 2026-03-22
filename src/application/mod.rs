@@ -19,33 +19,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
-
-#[macro_use]
-extern crate amplify;
-
-mod transport;
-pub mod session;
-#[cfg(feature = "reactor")]
-mod application;
-
-pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
-
-#[cfg(feature = "reactor")]
-pub use ::reactor::{Action, ResourceId, Timestamp};
-#[cfg(feature = "reactor")]
-pub use application::{client, node, service, tunnel};
-pub use session::{Artifact, NetProtocol, NetSession, NetStateMachine, NodeId};
-pub use transport::*;
-
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
-#[display("lowercase")]
-pub enum Direction {
-    Inbound,
-    Outbound,
-}
-
-impl Direction {
-    pub fn is_inbound(self) -> bool { matches!(self, Direction::Inbound) }
-    pub fn is_outbound(self) -> bool { matches!(self, Direction::Outbound) }
-}
+pub mod service;
+pub mod client;
+pub mod node;
+pub mod tunnel;

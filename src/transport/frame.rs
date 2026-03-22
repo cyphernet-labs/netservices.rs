@@ -20,16 +20,25 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
+
+use amplify::CursorDeque;
 
 pub trait Frame: Send + Sized {
     type Error: std::error::Error + Sync + Send + 'static;
 
     /// Reads frame from the stream.
     ///
-    /// If the stream doesn't contain the whole message yet must return `Ok(None)`
+    /// If the stream doesn't contain the whole message, must return `Ok(None)`
+    /// and DO NOT consume any data from the stream.
     fn unmarshall(reader: impl Read) -> Result<Option<Self>, Self::Error>;
     fn marshall(&self, writer: impl Write) -> Result<(), Self::Error>;
+
+    fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.marshall(&mut buf).expect("in-memory write operation");
+        buf
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,15 +57,14 @@ impl Marshaller {
         }
     }
 
-    pub fn push<F: Frame>(&mut self, frame: F) {
+    pub fn marshall<F: Frame>(&mut self, frame: F) {
         frame
             .marshall(&mut self.write_queue)
             .expect("in-memory write operation");
     }
 
-    pub fn pop<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {
-        let slice = self.read_queue.make_contiguous();
-        let mut cursor = io::Cursor::new(slice);
+    pub fn unmarshall<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {
+        let mut cursor = CursorDeque::new(&mut self.read_queue);
         let frame = F::unmarshall(&mut cursor)?;
         let pos = cursor.position() as usize;
         if frame.is_some() {
@@ -65,31 +73,14 @@ impl Marshaller {
         Ok(frame)
     }
 
+    pub fn extend_received(&mut self, data: impl IntoIterator<Item = u8>) {
+        self.read_queue.extend(data);
+    }
+
+    pub fn extend_sendable(&mut self, data: impl IntoIterator<Item = u8>) {
+        self.write_queue.extend(data);
+    }
+
     pub fn read_queue_len(&self) -> usize { self.read_queue.len() }
     pub fn write_queue_len(&self) -> usize { self.write_queue.len() }
-
-    /// # Errors
-    ///
-    /// If write queue is not empty (i.e. some messages were not sent) fails
-    /// to drain and returns back unmodified self
-    pub fn drain(mut self) -> Result<Vec<u8>, Self> {
-        if self.write_queue.is_empty() {
-            Ok(self.read_queue.drain(..).collect())
-        } else {
-            Err(self)
-        }
-    }
-}
-
-impl Read for Marshaller {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.write_queue.read(buf) }
-}
-
-impl Write for Marshaller {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.read_queue.write(buf) }
-
-    fn flush(&mut self) -> io::Result<()> {
-        // Do nothing
-        Ok(())
-    }
 }

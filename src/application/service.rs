@@ -24,7 +24,6 @@ use std::any::Any;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
-use std::io::Write;
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
@@ -502,16 +501,9 @@ impl<
                 let metrics = self.metrics.entry(*remote_id).or_default();
                 metrics.bytes_received += data.len();
 
-                if let Err(err) = marshaller.write_all(&data) {
-                    #[cfg(feature = "log")]
-                    log::error!(target: NAME, "Unable to process messages fast enough for remote {res_id}; disconnecting");
-                    self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
-
-                    return;
-                }
-
+                marshaller.extend_received(data);
                 loop {
-                    match marshaller.pop::<C::InFrame>() {
+                    match marshaller.unmarshall::<C::InFrame>() {
                         Ok(Some(frame)) => {
                             self.controller.on_frame(*remote_id, frame);
                         }
@@ -702,9 +694,7 @@ impl<
 /// The client runtime containing reactor thread managing connection to the remote peers and the
 /// use of the node APIs.
 pub struct Runtime<Cmd: Debug + Send> {
-    reactor: Reactor<Cmd, popol::Poller>, /* seems we do not need to pass any commands to
-                                           * the
-                                           * reactor */
+    reactor: Reactor<Cmd, popol::Poller>,
 }
 
 impl<Cmd: Debug + Send + 'static> Runtime<Cmd> {

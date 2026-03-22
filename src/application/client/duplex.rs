@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Written in 2022-2025 by
-//     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
+// Written in 2022-2026 by
+//     Dr. Maxim Orlovsky <orlovsky@cyphernet.io>
 //
-// Copyright 2022-2025 Cyphernet Labs, InDCS, Switzerland
+// Copyright 2022-2026 Cyphernet Labs, InDCS, Switzerland
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ use reactor::{Action, Error, Reactor, ResourceId, ResourceType, Timestamp};
 use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
 #[cfg(feature = "log")]
-const NAME: &str = "net-client";
+const NAME: &str = "client-peer";
 
 /// The commands which are sent from [`Client`] runtime on the main thread and [`ClientDelegate`]
 /// from inside the reactor thread to [`ClientService`] existing in the reactor thread.
@@ -259,6 +259,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> reactor::Handler for Clien
                 debug_assert_eq!(self.connection_fd, Some(fd));
                 self.delegate.on_established(artifact, self.attempts);
             }
+            // TODO: Do something with the excess of data!
             SessionEvent::Data(data) => match D::Reply::unmarshall(io::Cursor::new(data)) {
                 Ok(Some(reply)) => {
                     #[cfg(feature = "log")]
@@ -302,6 +303,9 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S>> reactor::Handler for Clien
 
         self.connection_fd = Some(fd);
         self.connection_id = Some(id);
+
+        // TODO: Consider moving this to handle_transport_event when the connection is actually
+        // established
 
         #[cfg(feature = "log")]
         log::trace!(target: NAME, "scheduling sending {} buffered messages to the server", self.data_stack.len());

@@ -21,7 +21,6 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Debug};
-use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -33,27 +32,23 @@ use reactor::poller::popol;
 use reactor::poller::popol::PopolWaker;
 use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
 
+use crate::frame::{PendingRequest, Request};
 use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, SessionEvent};
 
 #[cfg(feature = "log")]
 const NAME: &str = "client-onetime";
 
-pub enum ClientIface<Rq: Frame, Rs: Frame, X: Send> {
+pub enum ClientIface<Rq: Request, X: Send> {
     LocalRequest(X),
-    ServerResponse { request: Rq, response: Rs },
+    ServerResponse { request: Rq, response: Rq::Response },
 }
 
-struct PendingRequest<Rq: Frame> {
-    pub request: Rq,
-    pub awaits_reply: bool,
-}
-
-enum Cmd<S: NetSession, Rq: Frame> {
+enum Cmd<S: NetSession, Rq: Request> {
     Send(NetTransport<S>, PendingRequest<Rq>),
     Terminate,
 }
 
-impl<S: NetSession, Rq: Frame> Debug for Cmd<S, Rq> {
+impl<S: NetSession, Rq: Request> Debug for Cmd<S, Rq> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Cmd::Send(_, pending) => f
@@ -65,27 +60,25 @@ impl<S: NetSession, Rq: Frame> Debug for Cmd<S, Rq> {
     }
 }
 
-struct Inbox<Rq: Frame> {
+struct Inbox<Rq: Request> {
     buf: VecDeque<u8>,
     request: Rq,
 }
 
-struct Service<S: NetSession, Rq: Frame, Rs: Frame, X: Send> {
+struct Service<S: NetSession, Rq: Request, X: Send> {
     inboxes: HashMap<ResourceId, Inbox<Rq>>,
-    iface: Sender<ClientIface<Rq, Rs, X>>,
+    iface: Sender<ClientIface<Rq, X>>,
     send_queue: HashMap<RawFd, PendingRequest<Rq>>,
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
-    _phantom: PhantomData<(Rq, Rs)>,
 }
 
-impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> Service<S, Rq, Rs, X> {
-    fn new(iface: Sender<ClientIface<Rq, Rs, X>>) -> Self {
+impl<S: NetSession, Rq: Request, X: Send> Service<S, Rq, X> {
+    fn new(iface: Sender<ClientIface<Rq, X>>) -> Self {
         Self {
             inboxes: HashMap::new(),
             iface,
             send_queue: HashMap::new(),
             action_queue: VecDeque::new(),
-            _phantom: PhantomData,
         }
     }
 
@@ -99,7 +92,7 @@ impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> Service<S, Rq, Rs, X> {
     }
 }
 
-impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> reactor::Handler for Service<S, Rq, Rs, X> {
+impl<S: NetSession, Rq: Request, X: Send> reactor::Handler for Service<S, Rq, X> {
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
     type Command = Cmd<S, Rq>;
@@ -143,7 +136,7 @@ impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> reactor::Handler for Service<
 
                 inbox.buf.extend(data);
                 let mut cursor = CursorDeque::new(&mut inbox.buf);
-                match Rs::unmarshall(&mut cursor) {
+                match Rq::Response::unmarshall(&mut cursor) {
                     Ok(Some(response)) => {
                         if !cursor.is_empty() {
                             #[cfg(feature = "log")]
@@ -229,36 +222,34 @@ impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> reactor::Handler for Service<
     }
 }
 
-impl<S: NetSession, Rq: Frame, Rs: Frame, X: Send> Iterator for Service<S, Rq, Rs, X> {
+impl<S: NetSession, Rq: Request, X: Send> Iterator for Service<S, Rq, X> {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> { self.action_queue.pop_front() }
 }
 
-pub trait Connector: Send + 'static {
+pub trait SessionFactory: Send + 'static {
     type Session: NetSession + 'static;
-    type Request: Frame + Debug + 'static;
-    type Response: Frame + Debug + 'static;
 
     fn connect(&self) -> Option<Self::Session>;
 }
 
-enum FactoryCmd<Rq: Frame> {
+enum FactoryCmd<Rq: Request> {
     Request(PendingRequest<Rq>),
     Terminate,
 }
 
-struct Factory<C: Connector> {
+struct Factory<C: SessionFactory, Rq: Request> {
     connector: C,
-    receiver: Receiver<FactoryCmd<C::Request>>,
-    reactor: reactor::Controller<Cmd<C::Session, C::Request>, PopolWaker>,
+    receiver: Receiver<FactoryCmd<Rq>>,
+    reactor: reactor::Controller<Cmd<C::Session, Rq>, PopolWaker>,
 }
 
-impl<C: Connector> Factory<C> {
+impl<C: SessionFactory, Rq: Request + 'static> Factory<C, Rq> {
     fn new(
         connector: C,
-        receiver: Receiver<FactoryCmd<C::Request>>,
-        reactor: reactor::Controller<Cmd<C::Session, C::Request>, PopolWaker>,
+        receiver: Receiver<FactoryCmd<Rq>>,
+        reactor: reactor::Controller<Cmd<C::Session, Rq>, PopolWaker>,
     ) -> Self {
         Self { connector, receiver, reactor }
     }
@@ -276,28 +267,7 @@ impl<C: Connector> Factory<C> {
         while let Ok(cmd) = self.receiver.recv() {
             match cmd {
                 FactoryCmd::Request(pending) => {
-                    let Some(session) = self.connector.connect() else {
-                        #[cfg(feature = "log")]
-                        log::error!(target: NAME, "failed to connect to server");
-                        continue;
-                    };
-                    let Ok(transport) = NetTransport::with_session(session, Direction::Outbound)
-                        .inspect_err(|err| {
-                            #[cfg(feature = "log")]
-                            log::error!(target: NAME, "error establishing session: {err}");
-                        })
-                    else {
-                        // TODO: Ensure this works
-                        continue;
-                    };
-
-                    #[cfg(feature = "log")]
-                    log::info!(target: NAME, "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
-
-                    if let Err(err) = self.reactor.cmd(Cmd::Send(transport, pending)) {
-                        #[cfg(feature = "log")]
-                        log::error!(target: NAME, "failed to send request to the server: {err}");
-                    }
+                    self.process_request(pending);
                 }
                 FactoryCmd::Terminate => {
                     #[cfg(feature = "log")]
@@ -310,35 +280,64 @@ impl<C: Connector> Factory<C> {
             }
         }
     }
+
+    fn process_request(&self, pending: PendingRequest<Rq>) {
+        let Some(session) = self.connector.connect() else {
+            #[cfg(feature = "log")]
+            log::error!(target: NAME, "failed to connect to server");
+            return;
+        };
+        let Ok(transport) =
+            NetTransport::with_session(session, Direction::Outbound).inspect_err(|err| {
+                #[cfg(feature = "log")]
+                log::error!(target: NAME, "error establishing session: {err}");
+            })
+        else {
+            // TODO: Ensure this works
+            return;
+        };
+
+        #[cfg(feature = "log")]
+        log::info!(target: NAME, "server connections successfully established, scheduling registering the transport {} with the reactor", transport.display());
+
+        if let Err(err) = self.reactor.cmd(Cmd::Send(transport, pending)) {
+            #[cfg(feature = "log")]
+            log::error!(target: NAME, "failed to send request to the server: {err}");
+        }
+    }
 }
 
-pub struct UnaryClient<C: Connector> {
+pub struct UnaryClient<C: SessionFactory, Rq: Request> {
     factory: JoinHandle<()>,
-    sender: Sender<FactoryCmd<C::Request>>,
-    reactor: Reactor<Cmd<C::Session, C::Request>, popol::Poller>,
+    sender: Sender<FactoryCmd<Rq>>,
+    reactor: Reactor<Cmd<C::Session, Rq>, popol::Poller>,
 }
 
-impl<C: Connector> UnaryClient<C> {
+impl<C: SessionFactory, Rq: Request> UnaryClient<C, Rq> {
     pub fn new<X: Send + 'static>(
-        connector: C,
-        iface: Sender<ClientIface<C::Request, C::Response, X>>,
-    ) -> io::Result<Self> {
+        session_factory: C,
+        iface: Sender<ClientIface<Rq, X>>,
+    ) -> io::Result<Self>
+    where
+        Rq: 'static,
+        Rq::Response: 'static,
+    {
         let service = Service::new(iface);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
         let controller = reactor.controller();
         let (sender, receiver) = mpsc::channel();
-        let factory = Factory::new(connector, receiver, controller);
+        let factory = Factory::new(session_factory, receiver, controller);
         let factory = factory.run();
         Ok(Self { factory, sender, reactor })
     }
 
-    pub fn send_only(&self, request: C::Request) {
+    pub fn send_only(&self, request: Rq) {
         self.sender
             .send(FactoryCmd::Request(PendingRequest { request, awaits_reply: false }))
             .expect("failed to send request to server");
     }
 
-    pub fn send_receive(&self, request: C::Request) {
+    pub fn send_receive(&self, request: Rq) {
         self.sender
             .send(FactoryCmd::Request(PendingRequest { request, awaits_reply: true }))
             .expect("failed to send request to server");

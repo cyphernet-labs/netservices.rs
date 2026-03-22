@@ -31,7 +31,7 @@ mod resource;
 pub mod remotes;
 
 pub use connection::{Address, AsConnection, NetConnection, NetStream};
-pub use frame::{Frame, Marshaller};
+pub use frame::{Frame, Marshaller, Request};
 pub use listener::NetListener;
 #[cfg(feature = "reactor")]
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};

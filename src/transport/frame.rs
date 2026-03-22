@@ -20,6 +20,7 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::io::{Read, Write};
 
 use amplify::CursorDeque;
@@ -39,6 +40,23 @@ pub trait Frame: Send + Sized {
         self.marshall(&mut buf).expect("in-memory write operation");
         buf
     }
+}
+
+impl Frame for () {
+    type Error = Infallible;
+
+    fn unmarshall(_: impl Read) -> Result<Option<Self>, Self::Error> { Ok(Some(())) }
+
+    fn marshall(&self, _: impl Write) -> Result<(), Self::Error> { Ok(()) }
+}
+
+pub trait Request: Frame {
+    type Response: Frame;
+}
+
+pub(crate) struct PendingRequest<Rq: Request> {
+    pub request: Rq,
+    pub awaits_reply: bool,
 }
 
 #[derive(Clone, Debug, Default)]

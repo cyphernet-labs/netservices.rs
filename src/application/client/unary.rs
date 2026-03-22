@@ -38,11 +38,6 @@ use crate::{Direction, Frame, ImpossibleResource, NetSession, NetTransport, Sess
 #[cfg(feature = "log")]
 const NAME: &str = "client-onetime";
 
-pub enum ClientIface<Rq: Request, X: Send> {
-    LocalRequest(X),
-    ServerResponse { request: Rq, response: Rq::Response },
-}
-
 enum Cmd<S: NetSession, Rq: Request> {
     Send(NetTransport<S>, PendingRequest<Rq>),
     Terminate,
@@ -65,15 +60,15 @@ struct Inbox<Rq: Request> {
     request: Rq,
 }
 
-struct Service<S: NetSession, Rq: Request, X: Send> {
+struct Service<S: NetSession, Rq: Request> {
     inboxes: HashMap<ResourceId, Inbox<Rq>>,
-    iface: Sender<ClientIface<Rq, X>>,
+    iface: Sender<(Rq, Rq::Response)>,
     send_queue: HashMap<RawFd, PendingRequest<Rq>>,
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
 }
 
-impl<S: NetSession, Rq: Request, X: Send> Service<S, Rq, X> {
-    fn new(iface: Sender<ClientIface<Rq, X>>) -> Self {
+impl<S: NetSession, Rq: Request> Service<S, Rq> {
+    fn new(iface: Sender<(Rq, Rq::Response)>) -> Self {
         Self {
             inboxes: HashMap::new(),
             iface,
@@ -92,7 +87,7 @@ impl<S: NetSession, Rq: Request, X: Send> Service<S, Rq, X> {
     }
 }
 
-impl<S: NetSession, Rq: Request, X: Send> reactor::Handler for Service<S, Rq, X> {
+impl<S: NetSession, Rq: Request> reactor::Handler for Service<S, Rq> {
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
     type Command = Cmd<S, Rq>;
@@ -147,7 +142,7 @@ impl<S: NetSession, Rq: Request, X: Send> reactor::Handler for Service<S, Rq, X>
                         }
                         self.action_queue.push_back(Action::UnregisterTransport(id));
                         self.iface
-                            .send(ClientIface::ServerResponse { request: inbox.request, response })
+                            .send((inbox.request, response))
                             .expect("failed to send reply to callback");
                     }
                     Ok(None) => {
@@ -222,7 +217,7 @@ impl<S: NetSession, Rq: Request, X: Send> reactor::Handler for Service<S, Rq, X>
     }
 }
 
-impl<S: NetSession, Rq: Request, X: Send> Iterator for Service<S, Rq, X> {
+impl<S: NetSession, Rq: Request> Iterator for Service<S, Rq> {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> { self.action_queue.pop_front() }
@@ -314,14 +309,8 @@ pub struct UnaryClient<C: SessionFactory, Rq: Request> {
 }
 
 impl<C: SessionFactory, Rq: Request> UnaryClient<C, Rq> {
-    pub fn new<X: Send + 'static>(
-        session_factory: C,
-        iface: Sender<ClientIface<Rq, X>>,
-    ) -> io::Result<Self>
-    where
-        Rq: 'static,
-        Rq::Response: 'static,
-    {
+    pub fn new(session_factory: C, iface: Sender<(Rq, Rq::Response)>) -> io::Result<Self>
+    where Rq: 'static {
         let service = Service::new(iface);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
         let controller = reactor.controller();
